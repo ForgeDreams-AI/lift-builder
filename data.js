@@ -22,3 +22,25 @@ function lbCatLabel(id) {
   }
   return id ? id.charAt(0).toUpperCase() + id.slice(1) : 'Other';
 }
+
+/* ── Instagram how-to videos (from Jaden's tracker, Oct 2026) ──
+   Keyed by normalized exercise name. Shown in the exercise detail
+   sheet and on plan exercises where a link exists. */
+var EXERCISE_VIDEOS = {
+  "latpulldown": "https://www.instagram.com/reel/Dc9J-EnJlEa/",
+  "seatedcablerow": "https://www.instagram.com/reel/Dc9J-EnJlEa/",
+  "seatedcablerows": "https://www.instagram.com/reel/Dc9J-EnJlEa/",
+  "seatedrow": "https://www.instagram.com/reel/Dc9J-EnJlEa/",
+  "legpress": "https://www.instagram.com/reel/DVzbgb_Esr0/",
+  "legextensions": "https://www.instagram.com/reel/DUV_oBWkZvp/",
+  "legextension": "https://www.instagram.com/reel/DUV_oBWkZvp/",
+  "legcurl": "https://www.instagram.com/reel/DWUiBKQD-Yo/",
+  "lyinglegcurls": "https://www.instagram.com/reel/DWUiBKQD-Yo/",
+  "tricepspushdown": "https://www.instagram.com/reel/DcvmkH5OSYr/",
+  "reversefly": "https://www.instagram.com/reel/DcgnMi-II1W/",
+  "reverseflyes": "https://www.instagram.com/reel/DcgnMi-II1W/",
+  "dumbbellreversefly": "https://www.instagram.com/reel/DcgnMi-II1W/",
+  "bicepscurl": "https://www.instagram.com/reel/DSWTKzLASVU/"
+};
+function normExName(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+function exVideo(name) { return EXERCISE_VIDEOS[normExName(name)] || ''; }
