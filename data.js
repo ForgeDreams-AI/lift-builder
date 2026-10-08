@@ -1,4 +1,4 @@
-/* ── Lift Library — data constants ───────────────────────────────
+/* ── ForgeDreamsGYM — data constants ───────────────────────────────
    Static config only. All persisted state lives behind the Store
    abstraction in app.js (see docs/data-layer.md). */
 

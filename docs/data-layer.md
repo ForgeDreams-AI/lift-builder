@@ -1,4 +1,4 @@
-# Lift Library — data layer
+# ForgeDreamsGYM — data layer
 
 **Decision (locked):** this is a free product. All data lives in `localStorage`
 on the device. No accounts, no backend, no server phase — ever. Keep it

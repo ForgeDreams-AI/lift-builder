@@ -1,4 +1,4 @@
-/* ── Lift Library — Rehab Center content ──
+/* ── ForgeDreamsGYM — Rehab Center content ──
    Evidence-based routines compiled from sports-medicine research (Oct 2026).
    Plain lifter language up top, named protocols underneath.
    Content swaps in here when guidance updates — app code reads this file. */

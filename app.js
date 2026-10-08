@@ -1,5 +1,5 @@
 /* ============================================================
-   Lift Library — app logic (vanilla JS, no build step)
+   ForgeDreamsGYM — app logic (vanilla JS, no build step)
    Free product: everything lives in localStorage on this device.
    No accounts, no backend. Programs move between devices via
    shareable links (#p=<base64url program JSON>).
@@ -1282,7 +1282,7 @@ function shareProgram(id) {
   if (!p) return;
   var url = programShareUrl(p);
   if (navigator.share) {
-    navigator.share({ title: p.name + ' — Lift Library', text: 'Check out this lifting program:', url: url })
+    navigator.share({ title: p.name + ' — ForgeDreamsGYM', text: 'Check out this lifting program:', url: url })
       .catch(function () { /* user dismissed */ });
   } else if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(url).then(function () { toast('Share link copied'); },
@@ -2618,7 +2618,7 @@ function renderProgress(v) {
 function renderOnboarding(v) {
   v.innerHTML = '<div class="onboard animate-pop-in">' +
     '<span class="ob-ico">' + icon('dumbbell', 44) + '</span>' +
-    '<h2>Welcome to Lift Library</h2>' +
+    '<h2>Welcome to ForgeDreamsGYM</h2>' +
     '<p>Build programs, log lifts, watch yourself get stronger.</p>' +
     '<label class="field"><span>What should we call you?</span>' +
     '<input class="input" id="ob-name" maxlength="40" placeholder="Your name" autocomplete="given-name"></label>' +

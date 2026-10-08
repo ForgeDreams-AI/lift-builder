@@ -1,4 +1,4 @@
-/* ── Lift Library — 48 featured workout plans ──
+/* ── ForgeDreamsGYM — 48 featured workout plans ──
    Generated from the user's 48-plan program (Oct 2026).
    4 equipment × 3 styles × 4 schedules. Static data; do not edit by hand. */
 var PLAN_RULES = [
