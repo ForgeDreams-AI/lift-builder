@@ -368,6 +368,23 @@ a { color: var(--th-primary); }
 .onboard p { color: var(--th-ink-2); margin: 0 0 24px; }
 .onboard .field { text-align: left; display: block; margin-bottom: 18px; }
 
+/* ── Intro tour ───────────────────────────────────────────────── */
+.tour { max-width: 440px; margin: 0 auto; padding: 24px 20px 28px; min-height: 78vh; display: flex; flex-direction: column; }
+.tour-skip { align-self: flex-end; background: none; border: 0; color: var(--th-ink-3); font-size: 16px; font-weight: 600; padding: 12px 8px; min-height: 44px; cursor: pointer; }
+.tour-card { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px 4px; }
+.tour-ico { width: 96px; height: 96px; border-radius: 28px; background: var(--th-primary); color: #fff; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 24px; }
+.tour-card h2 { font-size: 32px; margin: 0 0 12px; line-height: 1.15; }
+.tour-card p { color: var(--th-ink-2); font-size: 17px; line-height: 1.5; margin: 0; max-width: 330px; }
+.tour-list { list-style: none; margin: 4px 0 0; padding: 0; width: 100%; max-width: 330px; text-align: left; }
+.tour-list li { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--th-line); font-size: 16px; color: var(--th-ink); }
+.tour-list li:last-child { border-bottom: 0; }
+.tour-list svg { color: var(--th-primary); flex: none; margin-top: 2px; }
+.tour-dots { display: flex; gap: 8px; justify-content: center; align-items: center; margin: 18px 0; min-height: 28px; }
+.tdot { width: 10px; height: 10px; border-radius: 50%; border: 0; background: var(--th-line); padding: 0; min-width: 10px; cursor: pointer; }
+.tdot.on { width: 30px; border-radius: 6px; background: var(--th-primary); }
+.tour-nav { display: flex; gap: 12px; }
+.tour-nav .btn { min-height: 54px; font-size: 18px; }
+
 /* ── Home dashboard ───────────────────────────────────────────── */
 .home-head { display: flex; align-items: center; gap: 8px; padding: 6px 0 2px; }
 .home-head h2 { margin: 2px 0 0; font-size: 32px; }

@@ -347,6 +347,15 @@ var Store = (function () {
       try { localStorage.setItem('liftBuilder.profile.v1', JSON.stringify({ name: String(name || '').slice(0, 40) })); }
       catch (e) { /* ignore */ }
     },
+    /* ---- intro tour: shown once after first name entry ---- */
+    getIntroSeen: function () {
+      try { return localStorage.getItem('liftBuilder.introSeen.v1') === '1'; }
+      catch (e) { return false; }
+    },
+    setIntroSeen: function () {
+      try { localStorage.setItem('liftBuilder.introSeen.v1', '1'); }
+      catch (e) { /* ignore */ }
+    },
     /* Most recent logged sets for an exercise (for prefill/coach). */
     lastExerciseSets: function (name) {
       var logs = this.getLogs();
@@ -571,6 +580,8 @@ var TABS = [
 var state = {
   tab: 'home',
   onboarding: false,      // first-launch name prompt
+  tour: false,            // intro tour after signup
+  tourIdx: 0,
   library: { view: 'cats', cat: null, q: '' },
   builder: null,          // {id, name, tagline, exercises[], picking:{cat,q}|null}
   builderReturn: 'programs',
@@ -623,6 +634,7 @@ function render() {
   var v = el('div', 'view animate-fade-in');
   root.appendChild(v);
   if (state.onboarding) { renderOnboarding(v); return; }
+  if (state.tour) { renderTour(v); return; }
   if (state.importing) { renderImport(v); return; }
   if (state.builder) { renderBuilder(v); return; }
   if (state.planView) { renderPlanDetail(v); return; }
@@ -2630,11 +2642,96 @@ function renderOnboarding(v) {
     if (!n) { inp.focus(); toast('Tell us your name to continue', 'err'); return; }
     Store.setName(n);
     state.onboarding = false;
+    if (!Store.getIntroSeen()) { state.tour = true; state.tourIdx = 0; }
     render();
     toast('Welcome, ' + n + '!');
   }
   document.getElementById('ob-go').onclick = go;
   inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); });
+}
+
+/* ============================================================
+   INTRO TOUR — swipeable carousel after first signup.
+   Shows once (liftBuilder.introSeen.v1); replayable from settings.
+   ============================================================ */
+var TOUR_CARDS = [
+  { icon: 'layers', title: '48 featured programs', text: 'Pick your gym type, style, and days per week \u2014 your plan builds itself.' },
+  { icon: 'play', title: 'Log every lift', text: 'Weight and reps per set. The app remembers last time and coaches you up.' },
+  { icon: 'flame', title: 'Your stats', text: 'Workouts, streaks, total sets, and total weight moved, all on Home.' },
+  { icon: 'trend', title: 'Sports science', text: 'Projected max per lift, training load from your effort rating, and push/pull + quad/ham balance checks.' },
+  { icon: 'target', title: 'Rehab Center', text: 'Science-backed routines for shoulders, hips, ankles, knees \u2014 tap to add to any workout.' },
+  { icon: 'timer', title: 'Tools', text: 'Plate calculator, smart rest timer, warm-up generator, body measurements.' },
+  { icon: 'plus', title: 'Custom exercises', text: 'Add your own moves, link or upload demo videos.' },
+  { icon: 'chart', title: 'Everything gets tracked', list: [
+    'Workouts',
+    'Sets',
+    'Reps',
+    'Volume (lb)',
+    'Workout-day streak',
+    'Projected 1RM per lift',
+    'PRs',
+    'RPE + weekly load + monotony',
+    'Muscle-group volume',
+    'Body measurements',
+    'Rest times'
+  ] },
+  { icon: 'dumbbell', title: 'You\u2019re in.', text: 'Your gym, your data, on your device. No accounts, no fees, ever.', cta: true }
+];
+function startTour() { state.tour = true; state.tourIdx = 0; render(); }
+function finishTour() {
+  Store.setIntroSeen();
+  state.tour = false; state.tourIdx = 0; state.tab = 'home';
+  render();
+}
+function renderTour(v) {
+  var i = state.tourIdx, card = TOUR_CARDS[i], last = i === TOUR_CARDS.length - 1;
+  var dots = TOUR_CARDS.map(function (c, n) {
+    return '<button class="tdot' + (n === i ? ' on' : '') + '" data-dot="' + n + '" aria-label="Go to card ' + (n + 1) + '"></button>';
+  }).join('');
+  var body;
+  if (card.list) {
+    body = '<ul class="tour-list">' + card.list.map(function (t) {
+      return '<li>' + icon('check', 18) + '<span>' + esc(t) + '</span></li>';
+    }).join('') + '</ul>';
+  } else {
+    body = '<p>' + esc(card.text) + '</p>';
+  }
+  v.innerHTML = '<div class="tour animate-pop-in">' +
+    '<button class="tour-skip press" id="tour-skip">Skip</button>' +
+    '<div class="tour-card" id="tour-card">' +
+    '<span class="tour-ico">' + icon(card.icon, 48) + '</span>' +
+    '<h2>' + esc(card.title) + '</h2>' + body + '</div>' +
+    '<div class="tour-dots">' + dots + '</div>' +
+    '<div class="tour-nav">' +
+    (i > 0 ? '<button class="btn ghost block press" id="tour-back">Back</button>' : '') +
+    (card.cta
+      ? '<button class="btn primary block press" id="tour-start">Start training</button>'
+      : '<button class="btn primary block press" id="tour-next">Next</button>') +
+    '</div></div>';
+  function goTo(n) {
+    state.tourIdx = Math.max(0, Math.min(TOUR_CARDS.length - 1, n));
+    render();
+  }
+  var sk = document.getElementById('tour-skip');
+  if (sk) sk.onclick = finishTour;
+  var nx = document.getElementById('tour-next');
+  if (nx) nx.onclick = function () { goTo(i + 1); };
+  var bk = document.getElementById('tour-back');
+  if (bk) bk.onclick = function () { goTo(i - 1); };
+  var st = document.getElementById('tour-start');
+  if (st) st.onclick = finishTour;
+  v.querySelectorAll('[data-dot]').forEach(function (d) {
+    d.onclick = function () { goTo(parseInt(d.getAttribute('data-dot'), 10)); };
+  });
+  /* swipe left/right on the card */
+  var tc = document.getElementById('tour-card'), sx = null;
+  tc.addEventListener('touchstart', function (e) { sx = e.touches[0].clientX; }, { passive: true });
+  tc.addEventListener('touchend', function (e) {
+    if (sx == null) return;
+    var dx = e.changedTouches[0].clientX - sx; sx = null;
+    if (dx < -50) { if (last) finishTour(); else goTo(i + 1); }
+    else if (dx > 50 && i > 0) goTo(i - 1);
+  }, { passive: true });
 }
 function openSettings() {
   var cur = Store.getName();
@@ -2643,11 +2740,15 @@ function openSettings() {
     '<label class="field"><span>Your name</span>' +
     '<input class="input" id="set-name" maxlength="40" value="' + esc(cur) + '"></label>' +
     '<div class="btn-row"><button class="btn block press" id="set-save">Save name</button></div>' +
+    '<div class="btn-row"><button class="btn ghost block press" id="set-tour">Replay intro</button></div>' +
     (hasPlan ? '<div class="btn-row"><button class="btn danger-line block press" id="set-endplan">End active plan</button></div>' : ''));
   document.getElementById('set-save').onclick = function () {
     var n = document.getElementById('set-name').value.trim();
     if (!n) { toast('Name can\u2019t be empty', 'err'); return; }
     Store.setName(n); closeSheet(); render(); toast('Saved');
+  };
+  document.getElementById('set-tour').onclick = function () {
+    closeSheet(); startTour();
   };
   var ep = document.getElementById('set-endplan');
   if (ep) ep.onclick = function () {
