@@ -429,13 +429,14 @@ var state = {
   importing: null,        // shared program being imported (#p= link)
   planView: null,         // featured plan id being viewed
   rehabView: null,        // 'landing' or a rehab routine id
-  featFilter: { eq: 'all', style: 'all', days: 'all' },
+  featNav: { eq: null, style: null },   // featured drill-down: null,null=L1 · eq set=L2 · eq+style=L3
   progEx: null            // exercise selected for the projected-max trend
 };
 
 function go(tab) {
   stopLogTimer();
   state.tab = tab;
+  if (tab === 'programs') { state.featNav = { eq: null, style: null }; state.planView = null; }
   if (tab === 'library' && state.library.view !== 'cats') { /* keep place */ }
   if (tab === 'log' && state.log.view === 'session') { /* keep session */ }
   render();
@@ -652,68 +653,116 @@ function addToProgramSheet(e) {
 /* ============================================================
    PROGRAMS — "My Programs" library (starts empty by design)
    ============================================================ */
-/* ---------- Featured programs (the 48 pre-programmed plans) ---------- */
-function featuredPlansFiltered() {
-  var f = state.featFilter;
+/* ---------- Featured programs: 3-level drill-down ---------- */
+var FEAT_EQUIP = [
+  { id: 'Commercial Gym', short: 'Commercial Gym', icon: 'dumbbell', blurb: 'Full gym access — barbells, machines, cables.' },
+  { id: 'Calisthenics / Bodyweight', short: 'Calisthenics', icon: 'flame', blurb: 'Bodyweight only — needs a pull-up bar or rings.' },
+  { id: 'Resistance Bands', short: 'Bands', icon: 'zap', blurb: 'Bands plus an anchor. Train anywhere.' },
+  { id: 'Apartment / Hotel Gym', short: 'Hotel Gym', icon: 'target', blurb: 'Dumbbells, a bench, limited cardio.' }
+];
+var FEAT_STYLES = [
+  { id: 'Traditional Strength Training', short: 'Traditional', icon: 'medal', blurb: 'Classic sets × reps. Get strong.' },
+  { id: 'Strength + Cardio', short: 'Strength + Cardio', icon: 'trend', blurb: 'Lift, plus running, biking, or stairs.' },
+  { id: 'HIIT / CrossFit-Inspired', short: 'HIIT / CrossFit', icon: 'timer', blurb: 'Circuits. Fast, hard, done.' }
+];
+var FEAT_DAYS = [2, 3, 4, 5];
+function featEqShort(id) {
+  for (var i = 0; i < FEAT_EQUIP.length; i++) if (FEAT_EQUIP[i].id === id) return FEAT_EQUIP[i].short;
+  return id;
+}
+function featStyleShort(id) {
+  for (var i = 0; i < FEAT_STYLES.length; i++) if (FEAT_STYLES[i].id === id) return FEAT_STYLES[i].short;
+  return id;
+}
+function featPlansFor(eq, style) {
   return FEATURED_PLANS.filter(function (p) {
-    if (f.eq !== 'all' && p.equipmentShort !== f.eq) return false;
-    if (f.style !== 'all' && p.styleShort !== f.style) return false;
-    if (f.days !== 'all' && p.daysPerWeek !== +f.days) return false;
-    return true;
+    return (!eq || p.equipment === eq) && (!style || p.style === style);
   });
 }
-function renderFeatFilters(v) {
-  var f = state.featFilter;
-  var opts = [
-    ['eq', [['all', 'All equipment'], ['Gym', 'Commercial Gym'], ['Bodyweight', 'Calisthenics'], ['Bands', 'Resistance Bands'], ['Hotel', 'Apartment/Hotel']]],
-    ['style', [['all', 'All styles'], ['Strength', 'Traditional Strength'], ['Strength+Cardio', 'Strength + Cardio'], ['HIIT', 'HIIT / CrossFit']]],
-    ['days', [['all', 'Any days'], ['2', '2/wk'], ['3', '3/wk'], ['4', '4/wk'], ['5', '5/wk']]]
-  ];
-  var wrap = el('div', 'feat-filters');
-  opts.forEach(function (o) {
-    var grp = el('div', 'chip-row');
-    o[1].forEach(function (c) {
-      var b = el('button', 'chip press' + (f[o[0]] === c[0] ? ' on' : ''));
-      b.textContent = c[1];
-      b.onclick = function () { f[o[0]] = c[0]; render(); };
-      grp.appendChild(b);
-    });
-    wrap.appendChild(grp);
+function featCrumbHTML(nav) {
+  var h = '<nav class="crumbs" aria-label="Breadcrumb">';
+  h += '<button class="clink press" data-nav="l1">Programs</button>';
+  if (nav.eq) {
+    h += '<span class="csep">›</span>';
+    if (nav.style) {
+      h += '<button class="clink press" data-nav="l2">' + esc(featEqShort(nav.eq)) + '</button>' +
+        '<span class="csep">›</span><span class="ccur">' + esc(featStyleShort(nav.style)) + '</span>';
+    } else {
+      h += '<span class="ccur">' + esc(featEqShort(nav.eq)) + '</span>';
+    }
+  }
+  return h + '</nav>';
+}
+function wireFeatCrumbs(root) {
+  root.querySelectorAll('[data-nav]').forEach(function (b) {
+    b.onclick = function () {
+      var t = b.getAttribute('data-nav');
+      if (t === 'l1') state.featNav = { eq: null, style: null };
+      else if (t === 'l2') state.featNav = { eq: state.featNav.eq, style: null };
+      render();
+    };
   });
-  v.appendChild(wrap);
 }
 function openPlanDetail(planId) { state.planView = planId; render(); }
 function renderFeaturedPrograms(v) {
-  var n = featuredPlansFiltered().length;
+  var nav = state.featNav;
   var head = el('div');
-  head.innerHTML = viewHead('Featured Programs', 'Programs',
-    n + ' coach-built plan' + (n === 1 ? '' : 's') + ' — filter by gear, style, and days per week.') +
-    '<div id="feat-filters"></div><div id="feat-list"></div>';
-  v.appendChild(head);
-  renderFeatFilters(document.getElementById('feat-filters'));
-  var list = document.getElementById('feat-list');
-  featuredPlansFiltered().forEach(function (p) {
-    var d = el('div', 'prog-card feat');
-    d.innerHTML =
-      '<h3>' + esc(p.title) + '</h3>' +
-      '<div class="tag">' + esc(p.equipmentShort) + ' \u00b7 ' + esc(p.styleShort) + ' \u00b7 ' + p.daysPerWeek + '/wk</div>' +
-      '<div class="prog-actions">' +
-      '<button class="btn primary press" data-act="start">' + icon('play', 18) + ' Start this plan</button>' +
-      '<button class="btn ghost press" data-act="view">View</button>' +
-      '</div>';
-    d.querySelectorAll('[data-act]').forEach(function (b) {
-      var act = b.getAttribute('data-act');
-      b.onclick = function (ev) {
-        ev.stopPropagation();
-        if (act === 'start') openCommitSheet(p.id, 'featured');
-        else openPlanDetail(p.id);
-      };
+  if (!nav.eq) {
+    /* LEVEL 1 — gym type boxes */
+    head.innerHTML = viewHead('Featured Programs', 'Programs',
+      '48 coach-built plans. Pick your gear — three taps to your plan.') +
+      '<div class="cat-grid" id="feat-l1"></div>';
+    v.appendChild(head);
+    var g1 = document.getElementById('feat-l1');
+    FEAT_EQUIP.forEach(function (e) {
+      var n = featPlansFor(e.id, null).length;
+      var b = el('button', 'cat-box press');
+      b.innerHTML = '<span class="cat-ico">' + icon(e.icon, 26) + '</span>' +
+        '<h3>' + esc(e.id) + '</h3><span class="n">' + n + ' plans</span><p>' + esc(e.blurb) + '</p>';
+      b.onclick = function () { state.featNav = { eq: e.id, style: null }; render(); };
+      g1.appendChild(b);
     });
-    list.appendChild(d);
-  });
-  if (!n) {
-    list.innerHTML = emptyState('star', 'No plans match', 'Try widening your filters.');
+    return;
   }
+  if (!nav.style) {
+    /* LEVEL 2 — workout style boxes */
+    head.innerHTML = backbar('Programs') + featCrumbHTML(nav) +
+      viewHead('Workout style', featEqShort(nav.eq), 'How do you want to train?') +
+      '<div class="cat-grid" id="feat-l2"></div>';
+    v.appendChild(head);
+    document.getElementById('back-btn').onclick = function () {
+      state.featNav = { eq: null, style: null }; render();
+    };
+    wireFeatCrumbs(v);
+    var g2 = document.getElementById('feat-l2');
+    FEAT_STYLES.forEach(function (s) {
+      var n = featPlansFor(nav.eq, s.id).length;
+      var b = el('button', 'cat-box press');
+      b.innerHTML = '<span class="cat-ico">' + icon(s.icon, 26) + '</span>' +
+        '<h3>' + esc(s.id) + '</h3><span class="n">' + n + ' plans</span><p>' + esc(s.blurb) + '</p>';
+      b.onclick = function () { state.featNav = { eq: nav.eq, style: s.id }; render(); };
+      g2.appendChild(b);
+    });
+    return;
+  }
+  /* LEVEL 3 — days-per-week boxes */
+  head.innerHTML = backbar(featEqShort(nav.eq)) + featCrumbHTML(nav) +
+    viewHead('Days per week', featStyleShort(nav.style), 'How many days can you train?') +
+    '<div class="cat-grid" id="feat-l3"></div>';
+  v.appendChild(head);
+  document.getElementById('back-btn').onclick = function () {
+    state.featNav = { eq: nav.eq, style: null }; render();
+  };
+  wireFeatCrumbs(v);
+  var g3 = document.getElementById('feat-l3');
+  FEAT_DAYS.forEach(function (d) {
+    var plans = featPlansFor(nav.eq, nav.style).filter(function (p) { return p.daysPerWeek === d; });
+    var b = el('button', 'cat-box press');
+    b.innerHTML = '<span class="daynum">' + d + '</span>' +
+      '<h3>Days / week</h3><span class="n">' + (plans.length ? plans[0].days.length + ' training days' : '—') + '</span>';
+    b.onclick = function () { if (plans.length) openPlanDetail(plans[0].id); };
+    g3.appendChild(b);
+  });
 }
 function renderMyPrograms(v) {
   var progs = Store.getPrograms();
@@ -772,7 +821,7 @@ function renderPrograms(v) {
 function renderPlanDetail(v) {
   var p = getFeaturedPlan(state.planView);
   if (!p) { state.planView = null; render(); return; }
-  v.innerHTML = '<button class="backlink press" id="pd-back">\u2190 All programs</button>' +
+  v.innerHTML = '<button class="backlink press" id="pd-back">\u2190 Back</button>' +
     '<div class="plan-hero"><span class="kicker">' + esc(p.equipment) + '</span><h2>' + esc(p.title) + '</h2>' +
     '<p class="sec-sub">' + p.daysPerWeek + ' days/week \u00b7 ' + esc(p.style) + '</p></div>';
   document.getElementById('pd-back').onclick = function () { state.planView = null; render(); };
@@ -1550,11 +1599,11 @@ function renderRehabLanding(v) {
     '<div id="rh-cards"></div>';
   document.getElementById('rh-back').onclick = function () { state.rehabView = null; state.tab = 'home'; render(); };
   var wrap = document.getElementById('rh-cards');
+  wrap.className = 'cat-grid';
   REHAB_ROUTINES.forEach(function (r) {
-    var b = el('button', 'row-card press');
-    b.innerHTML = '<span class="row-ico">' + icon(r.icon || 'medal', 22) + '</span>' +
-      '<span class="t"><b>' + esc(r.name) + '</b><small>' + esc(r.tagline) + '</small></span>' +
-      '<span class="row-chev">' + icon('chevR', 20) + '</span>';
+    var b = el('button', 'cat-box press');
+    b.innerHTML = '<span class="cat-ico">' + icon(r.icon || 'medal', 24) + '</span>' +
+      '<h3>' + esc(r.name) + '</h3><p>' + esc(r.tagline) + '</p>';
     b.onclick = function () { state.rehabView = r.id; render(); };
     wrap.appendChild(b);
   });
@@ -1816,9 +1865,9 @@ var MEASURE_TYPES = [
 function openMeasureSheet() {
   var sel = MEASURE_TYPES[0][0];
   openSheet('<h3>Log measurement</h3>' +
-    '<div class="chip-row wrap" id="ms-types">' +
+    '<div class="pick-grid" id="ms-types">' +
     MEASURE_TYPES.map(function (t, i) {
-      return '<button class="chip press' + (i === 0 ? ' on' : '') + '" data-mt="' + t[0] + '">' + t[1] + ' (' + t[2] + ')</button>';
+      return '<button class="pick-box press' + (i === 0 ? ' on' : '') + '" data-mt="' + t[0] + '">' + t[1] + '<small>' + t[2] + '</small></button>';
     }).join('') + '</div>' +
     '<label class="field"><span>Value</span>' +
     '<input class="input" id="ms-val" type="number" inputmode="decimal" min="0" step="0.1" placeholder="0"></label>' +
@@ -2060,9 +2109,9 @@ function renderTrendCard(v) {
   var h = '<div class="sec-head">Projected max trend</div>';
   if (!exs.length) { card.innerHTML = h + '<p class="sec-sub">Log some lifts to start tracking.</p>'; v.appendChild(card); return; }
   if (!state.progEx || exs.indexOf(state.progEx) < 0) state.progEx = exs[0];
-  h += '<div class="chip-row wrap">';
+  h += '<div class="pick-grid">';
   exs.forEach(function (ex) {
-    h += '<button class="chip press' + (ex === state.progEx ? ' on' : '') + '" data-tex="' + esc(ex) + '">' + esc(ex) + '</button>';
+    h += '<button class="pick-box press' + (ex === state.progEx ? ' on' : '') + '" data-tex="' + esc(ex) + '">' + esc(ex) + '</button>';
   });
   h += '</div><div id="trend-body"></div>';
   card.innerHTML = h;

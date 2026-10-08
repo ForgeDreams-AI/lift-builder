@@ -503,3 +503,18 @@ a { color: var(--th-primary); }
 .rh-set.done { border-color: var(--th-success); color: var(--th-success); }
 .card h4 { margin: 14px 0 6px; font-size: 15px; }
 .card h4:first-of-type { margin-top: 6px; }
+
+/* ── Breadcrumbs (featured drill-down) ────────────────────────── */
+.crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 2px 0 12px; }
+.clink { background: none; border: 0; padding: 8px 4px; min-height: 44px; font-size: 14px; font-weight: 700; color: var(--th-primary); cursor: pointer; }
+.csep { color: var(--th-ink-3); font-weight: 700; }
+.ccur { font-size: 14px; font-weight: 700; color: var(--th-ink); padding: 8px 4px; }
+
+/* ── Day number boxes ─────────────────────────────────────────── */
+.daynum { font-family: "Barlow Condensed", sans-serif; font-weight: 800; font-size: 52px; line-height: 1; color: var(--th-primary); }
+
+/* ── Compact pick boxes (replaces stacked chips) ──────────────── */
+.pick-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+.pick-box { background: var(--th-surface); border: 1px solid var(--th-line); border-radius: 14px; padding: 14px 12px; min-height: 56px; font-size: 15px; font-weight: 700; color: var(--th-ink); text-align: center; box-shadow: var(--th-shadow); cursor: pointer; }
+.pick-box small { display: block; font-size: 12px; font-weight: 600; color: var(--th-ink-3); margin-top: 2px; }
+.pick-box.on { border: 2px solid var(--th-primary); color: var(--th-primary); padding: 13px 11px; }
