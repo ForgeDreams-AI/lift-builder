@@ -8,9 +8,10 @@ simple.
 
 | Key | Contents |
 |---|---|
-| `liftBuilder.v1` | `{ programs: [...], logs: [...], activePlan: {...} | null, measurements: [...] }` — the entire user store |
+| `liftBuilder.v1` | `{ programs: [...], logs: [...], activePlan: {...} | null, measurements: [...], customExercises: [...] }` — the entire user store |
 | `liftBuilder.exdb.v1` | `{ at, data: [...] }` — cached free-exercise-db (876 exercises, ~1MB), refetched when missing/stale |
 | `liftBuilder.profile.v1` | `{ name: "..." }` — display name from onboarding, editable in settings |
+| IndexedDB `liftBuilder.v1` → `customVideos` | uploaded demo-video blobs for custom exercises, keyed by exercise id (device-local, 50MB cap) |
 
 ## Featured plans (the 48 pre-programmed plans)
 
@@ -143,3 +144,35 @@ appear in the UI.
   prior bests (a real baseline is required — a first-ever lift is not
   a PR). New PRs get a celebration sheet, same pattern as Jaden's
   tracker.
+
+## Custom exercises (user-created)
+
+Users can create their own exercises from the Library tab or the program
+builder picker ("Add custom exercise"). Form: name (required), primary
+muscle (picker over the DB muscle list), equipment (barbell / dumbbell /
+kettlebell / machine / cable / bodyweight / band / other), how-to notes
+(optional, one step per line). Video is optional, two ways: paste a link
+(Instagram, YouTube…) shown as a "Watch video" button, or upload from
+the device (played inline on the exercise detail sheet).
+
+- Metadata lives in the main store as `customExercises[]`:
+  `{ id: "custom_x…", name, muscle, equipment, notes, videoUrl,
+  hasVideo, createdAt, updatedAt }`. Store methods: `getCustomExercises`,
+  `getCustomExercise`, `saveCustomExercise`, `deleteCustomExercise`.
+- Uploaded videos live as blobs in IndexedDB (`liftBuilder.v1` DB,
+  `customVideos` object store, keyed by exercise id) via the `VideoStore`
+  helper in app.js — device-local, no backend. 50MB cap with a friendly
+  error on oversize files.
+- `customToDb()` maps a custom record onto the free-exercise-db shape
+  (`custom: true`), and `CustomEx` (id → record map) is consulted by
+  `exFor()` and `openExerciseSheet()` alongside `EXDB.byId` — so customs
+  work identically in library search, the builder picker, logging
+  (prefill, coach, projected max), and stats. Custom rows carry a red
+  "Custom" chip.
+- Edit and delete live on the custom exercise's detail sheet. Deleting
+  warns when the exercise is used in programs / has logged sets: programs
+  keep the name, sets, and reps (only the saved details unlink); logs
+  keep full history by name.
+- Shareable `#p=` program links containing a custom exercise degrade
+  gracefully on the recipient's device (name-based, no demo) since
+  customs are device-local.

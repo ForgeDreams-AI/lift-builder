@@ -135,7 +135,7 @@ var Store = (function () {
   var KEY = 'liftBuilder.v1';
   var EXDB_KEY = 'liftBuilder.exdb.v1';
 
-  function blank() { return { programs: [], logs: [], activePlan: null, measurements: [] }; }
+  function blank() { return { programs: [], logs: [], activePlan: null, measurements: [], customExercises: [] }; }
   function read() {
     try {
       var raw = localStorage.getItem(KEY);
@@ -146,7 +146,8 @@ var Store = (function () {
         programs: Array.isArray(p.programs) ? p.programs : [],
         logs: Array.isArray(p.logs) ? p.logs : [],
         activePlan: (p.activePlan && typeof p.activePlan === 'object') ? p.activePlan : null,
-        measurements: Array.isArray(p.measurements) ? p.measurements : []
+        measurements: Array.isArray(p.measurements) ? p.measurements : [],
+        customExercises: Array.isArray(p.customExercises) ? p.customExercises : []
       };
     } catch (e) { return blank(); }
   }
@@ -171,6 +172,20 @@ var Store = (function () {
       exercises: Array.isArray(p.exercises) ? p.exercises.map(cleanEx) : [],
       createdAt: p.createdAt || Date.now(),
       updatedAt: p.updatedAt || Date.now()
+    };
+  }
+  function cleanCustomExercise(c) {
+    c = c || {};
+    return {
+      id: String(c.id || ('custom_' + uid())),
+      name: String(c.name || 'Custom exercise').slice(0, 80),
+      muscle: String(c.muscle || ''),
+      equipment: String(c.equipment || 'other'),
+      notes: String(c.notes || '').slice(0, 2000),
+      videoUrl: String(c.videoUrl || '').slice(0, 500),
+      hasVideo: !!c.hasVideo,
+      createdAt: c.createdAt || Date.now(),
+      updatedAt: Date.now()
     };
   }
 
@@ -274,6 +289,33 @@ var Store = (function () {
       var s = read();
       s.measurements = s.measurements.filter(function (m) { return m.id !== id; });
       write(s);
+    },
+    /* ---- user-created exercises (metadata here; video blobs in IndexedDB) ---- */
+    getCustomExercises: function () {
+      return read().customExercises.slice().sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
+    },
+    getCustomExercise: function (id) {
+      var cs = read().customExercises;
+      for (var i = 0; i < cs.length; i++) if (cs[i].id === id) return cs[i];
+      return null;
+    },
+    saveCustomExercise: function (c) {
+      var s = read();
+      var cl = cleanCustomExercise(c);
+      var found = false;
+      for (var i = 0; i < s.customExercises.length; i++) {
+        if (s.customExercises[i].id === cl.id) { s.customExercises[i] = cl; found = true; break; }
+      }
+      if (!found) s.customExercises.push(cl);
+      write(s);
+      if (typeof CustomEx !== 'undefined') CustomEx.refresh();
+      return cl;
+    },
+    deleteCustomExercise: function (id) {
+      var s = read();
+      s.customExercises = s.customExercises.filter(function (c) { return c.id !== id; });
+      write(s);
+      if (typeof CustomEx !== 'undefined') CustomEx.refresh();
     },
     deleteLog: function (id) {
       var s = read();
@@ -382,8 +424,116 @@ var EXDB = {
 function exFor(ref) {
   if (!ref) return null;
   if (ref.dbId && EXDB.byId[ref.dbId]) return EXDB.byId[ref.dbId];
+  if (ref.dbId) { var c = CustomEx.get(ref.dbId); if (c) return c; }
   return EXDB.findByName(ref.name || ref.exercise || '');
 }
+
+/* ---------------- user-created exercises ----------------
+   Metadata lives in the Store (localStorage); uploaded demo videos
+   live as blobs in IndexedDB (same DB name, separate object store).
+   customToDb() maps a custom record onto the free-exercise-db shape
+   so library search, the picker, the detail sheet, and logging all
+   treat customs exactly like built-in exercises. */
+var CE_EQUIP = [
+  { id: 'barbell', label: 'Barbell' },
+  { id: 'dumbbell', label: 'Dumbbell' },
+  { id: 'kettlebell', label: 'Kettlebell' },
+  { id: 'machine', label: 'Machine' },
+  { id: 'cable', label: 'Cable' },
+  { id: 'bodyweight', label: 'Bodyweight' },
+  { id: 'band', label: 'Resistance band' },
+  { id: 'other', label: 'Other' }
+];
+function equipmentLabel(eq) {
+  for (var i = 0; i < CE_EQUIP.length; i++) if (CE_EQUIP[i].id === eq) return CE_EQUIP[i].label;
+  return eq ? eq.charAt(0).toUpperCase() + eq.slice(1) : '';
+}
+function customToDb(c) {
+  var steps = String(c.notes || '').split('\n').map(function (s) { return s.trim(); })
+    .filter(function (s) { return s.length > 0; });
+  return {
+    id: c.id,
+    name: c.name,
+    category: 'strength',
+    equipment: c.equipment || 'other',
+    primaryMuscles: c.muscle ? [c.muscle] : [],
+    secondaryMuscles: [],
+    instructions: steps,
+    custom: true,
+    videoUrl: c.videoUrl || '',
+    hasVideo: !!c.hasVideo
+  };
+}
+var CustomEx = {
+  map: null,
+  refresh: function () {
+    this.map = {};
+    var all = [];
+    try { all = Store.getCustomExercises(); } catch (e) { all = []; }
+    for (var i = 0; i < all.length; i++) this.map[all[i].id] = customToDb(all[i]);
+  },
+  get: function (id) {
+    if (!this.map) this.refresh();
+    return (id && this.map[id]) || null;
+  },
+  all: function () {
+    if (!this.map) this.refresh();
+    var out = [];
+    for (var k in this.map) if (Object.prototype.hasOwnProperty.call(this.map, k)) out.push(this.map[k]);
+    return out;
+  }
+};
+
+/* Uploaded demo videos for custom exercises — device-local blobs. */
+var VideoStore = (function () {
+  var DB = 'liftBuilder.v1', OS = 'customVideos', dbp = null;
+  function open() {
+    if (dbp) return dbp;
+    dbp = new Promise(function (res, rej) {
+      try {
+        if (typeof indexedDB === 'undefined') throw new Error('no indexedDB');
+        var rq = indexedDB.open(DB, 1);
+        rq.onupgradeneeded = function () {
+          if (!rq.result.objectStoreNames.contains(OS)) rq.result.createObjectStore(OS);
+        };
+        rq.onsuccess = function () { res(rq.result); };
+        rq.onerror = function () { rej(rq.error || new Error('idb open failed')); };
+      } catch (e) { rej(e); }
+    });
+    return dbp;
+  }
+  return {
+    put: function (id, blob) {
+      return open().then(function (db) {
+        return new Promise(function (res, rej) {
+          var tx = db.transaction(OS, 'readwrite');
+          tx.objectStore(OS).put(blob, id);
+          tx.oncomplete = function () { res(); };
+          tx.onerror = function () { rej(tx.error || new Error('idb put failed')); };
+        });
+      });
+    },
+    get: function (id) {
+      return open().then(function (db) {
+        return new Promise(function (res, rej) {
+          var rq = db.transaction(OS, 'readonly').objectStore(OS).get(id);
+          rq.onsuccess = function () { res(rq.result || null); };
+          rq.onerror = function () { rej(rq.error || new Error('idb get failed')); };
+        });
+      }).catch(function () { return null; });
+    },
+    del: function (id) {
+      return open().then(function (db) {
+        return new Promise(function (res) {
+          var tx = db.transaction(OS, 'readwrite');
+          tx.objectStore(OS).delete(id);
+          tx.oncomplete = function () { res(); };
+          tx.onerror = function () { res(); };
+        });
+      }).catch(function () { /* already gone / unavailable */ });
+    }
+  };
+})();
 
 /* ---------------- toast ---------------- */
 function toast(msg, kind) {
@@ -493,6 +643,9 @@ function libExercises() {
   var q = state.library.q.trim().toLowerCase();
   var list = EXDB.data;
   if (state.library.cat) list = list.filter(function (e) { return e.category === state.library.cat; });
+  var customs = CustomEx.all();
+  if (state.library.cat) customs = customs.filter(function (e) { return e.category === state.library.cat; });
+  list = customs.concat(list);
   if (q) {
     list = list.filter(function (e) {
       var hay = (e.name + ' ' + (e.equipment || '') + ' ' + (e.primaryMuscles || []).join(' ') + ' ' + (e.secondaryMuscles || []).join(' ')).toLowerCase();
@@ -505,6 +658,7 @@ function renderLibrary(v) {
   v.innerHTML = viewHead('Exercise Library', 'Library', EXDB.status === 'ready' ? EXDB.data.length + ' exercises' : 'Loading exercises…') +
     '<div class="search-wrap">' + icon('search', 20) +
     '<input class="input" id="lib-q" type="search" placeholder="Search exercises, muscles, equipment…" value="' + esc(state.library.q) + '"></div>' +
+    '<div class="btn-row" style="margin-top:10px"><button class="btn ghost block press" id="lib-add-custom">' + icon('plus', 18) + ' Add custom exercise</button></div>' +
     '<div id="lib-body"></div>';
   var q = document.getElementById('lib-q');
   q.addEventListener('input', function () {
@@ -513,6 +667,7 @@ function renderLibrary(v) {
     if (state.library.view === 'all' && !q.value.trim() && !state.library.cat) state.library.view = 'cats';
     renderLibBody();
   });
+  document.getElementById('lib-add-custom').onclick = function () { openCustomExerciseForm(null, null); };
   renderLibBody();
 }
 function renderLibBody() {
@@ -535,6 +690,13 @@ function renderLibBody() {
     var counts = {};
     EXDB.data.forEach(function (e) { counts[e.category] = (counts[e.category] || 0) + 1; });
     var html = '<div class="cat-grid">';
+    var nCustom = CustomEx.all().length;
+    if (nCustom) {
+      html += '<button class="cat-box press" data-customall="1">' +
+        '<span class="cat-ico">' + icon('pencil', 24) + '</span>' +
+        '<h3>My exercises</h3><span class="n">' + nCustom + ' custom</span>' +
+        '<p>Exercises you created</p></button>';
+    }
     LB_CATEGORIES.forEach(function (c) {
       var n = counts[c.id] || 0;
       if (!n) return;
@@ -562,6 +724,43 @@ function renderLibBody() {
         var qq = document.getElementById('lib-q'); if (qq) qq.focus();
       };
     });
+    var cab = body.querySelector('[data-customall]');
+    if (cab) cab.onclick = function () { state.library.view = 'custom'; state.library.cat = null; render(); };
+    return;
+  }
+  if (state.library.view === 'custom') {
+    /* the user's own exercises */
+    var cq = state.library.q.trim().toLowerCase();
+    var cl = CustomEx.all();
+    if (cq) {
+      cl = cl.filter(function (e) {
+        var hay = (e.name + ' ' + (e.equipment || '') + ' ' + (e.primaryMuscles || []).join(' ')).toLowerCase();
+        return hay.indexOf(cq) >= 0;
+      });
+    }
+    var htmlc = backbar('Categories') +
+      '<div class="sec-head">My exercises<span class="n">' + cl.length + '</span></div>' +
+      '<div class="btn-row" style="margin-bottom:12px"><button class="btn ghost block press" id="lib-add-custom2">' + icon('plus', 18) + ' Add custom exercise</button></div>';
+    if (!cl.length) {
+      htmlc += emptyState('pencil', 'No custom exercises yet', 'Create your own — name it, pick the muscle and equipment, add a video if you want.');
+    } else {
+      cl.forEach(function (e) {
+        htmlc += '<button class="row-card press" data-ex="' + esc(e.id) + '">' +
+          '<span class="row-ico">' + icon('dumbbell', 22) + '</span>' +
+          '<span class="t"><b>' + esc(e.name) + '</b>' +
+          '<small><span class="chip custom">Custom</span>' +
+          (e.primaryMuscles[0] ? '<span class="chip">' + esc(muscleLabel(e.primaryMuscles[0])) + '</span>' : '') +
+          (e.equipment ? '<span class="chip">' + esc(equipmentLabel(e.equipment)) + '</span>' : '') + '</small></span>' +
+          '<span class="row-chev">' + icon('chevR', 20) + '</span></button>';
+      });
+    }
+    body.innerHTML = htmlc;
+    var bb2 = document.getElementById('back-btn');
+    if (bb2) bb2.onclick = function () { state.library.view = 'cats'; state.library.cat = null; render(); };
+    document.getElementById('lib-add-custom2').onclick = function () { openCustomExerciseForm(null, null); };
+    body.querySelectorAll('[data-ex]').forEach(function (b) {
+      b.onclick = function () { openExerciseSheet(b.getAttribute('data-ex')); };
+    });
     return;
   }
   // list view
@@ -576,8 +775,9 @@ function renderLibBody() {
       html2 += '<button class="row-card press" data-ex="' + esc(e.id) + '">' +
         '<span class="row-ico">' + icon('dumbbell', 22) + '</span>' +
         '<span class="t"><b>' + esc(e.name) + '</b>' +
-        '<small><span class="chip">' + esc(lbCatLabel(e.category)) + '</span>' +
-        (e.equipment ? '<span class="chip">' + esc(e.equipment) + '</span>' : '') + '</small></span>' +
+        '<small>' + (e.custom ? '<span class="chip custom">Custom</span>' : '') +
+        '<span class="chip">' + esc(lbCatLabel(e.category)) + '</span>' +
+        (e.equipment ? '<span class="chip">' + esc(equipmentLabel(e.equipment)) + '</span>' : '') + '</small></span>' +
         '<span class="row-chev">' + icon('chevR', 20) + '</span></button>';
     });
     if (list.length > 300) html2 += '<p class="sec-sub">Showing first 300 — refine your search.</p>';
@@ -592,7 +792,7 @@ function renderLibBody() {
 
 /* Exercise detail bottom sheet */
 function openExerciseSheet(id, name) {
-  var e = id ? EXDB.byId[id] : null;
+  var e = id ? (EXDB.byId[id] || CustomEx.get(id)) : null;
   if (!e && name) e = EXDB.findByName(name);
   if (!e) {
     /* not in the DB — simple info sheet */
@@ -600,26 +800,184 @@ function openExerciseSheet(id, name) {
       '<p class="sub">No demo available for this one yet — follow the plan\u2019s form cues and keep it controlled.</p>');
     return;
   }
+  var isCustom = !!e.custom;
   var imgs = '';
-  for (var i = 0; i < 2; i++) {
-    var u = EXDB.img(e, i);
-    if (u) imgs += '<img src="' + esc(u) + '" alt="' + esc(e.name) + ' demo" loading="lazy" onerror="this.remove()">';
+  if (!isCustom) {
+    for (var i = 0; i < 2; i++) {
+      var u = EXDB.img(e, i);
+      if (u) imgs += '<img src="' + esc(u) + '" alt="' + esc(e.name) + ' demo" loading="lazy" onerror="this.remove()">';
+    }
   }
   var muscles = (e.primaryMuscles || []).concat(e.secondaryMuscles || []).filter(function (m, i, a) { return a.indexOf(m) === i; });
+  var videoHtml = '';
+  if (isCustom && e.hasVideo) {
+    videoHtml += '<div class="exd-sec"><h4>Video</h4><div id="exd-video"><p class="sec-sub">Loading video…</p></div></div>';
+  }
+  if (isCustom && e.videoUrl) {
+    videoHtml += '<div class="btn-row"><a class="btn block ghost press" href="' + esc(e.videoUrl) + '" target="_blank" rel="noopener">' + icon('play', 18) + ' Watch video</a></div>';
+  }
   openSheet(
     '<h3>' + esc(e.name) + '</h3>' +
-    '<p class="sub"><span class="chip">' + esc(lbCatLabel(e.category)) + '</span>' +
-    (e.equipment ? ' <span class="chip">' + esc(e.equipment) + '</span>' : '') +
+    '<p class="sub">' +
+    (isCustom ? '<span class="chip custom">Custom</span>' : '') +
+    '<span class="chip">' + esc(lbCatLabel(e.category)) + '</span>' +
+    (e.equipment ? ' <span class="chip">' + esc(equipmentLabel(e.equipment)) + '</span>' : '') +
     (e.level ? ' <span class="chip">' + esc(e.level) + '</span>' : '') + '</p>' +
     (imgs ? '<div class="exd-imgs">' + imgs + '</div>' : '') +
+    videoHtml +
     (muscles.length ? '<div class="exd-sec"><h4>Muscles worked</h4><div class="muscle-wrap">' +
-      muscles.map(function (m) { return '<span class="chip">' + esc(m) + '</span>'; }).join('') + '</div></div>' : '') +
+      muscles.map(function (m) { return '<span class="chip">' + esc(muscleLabel(m)) + '</span>'; }).join('') + '</div></div>' : '') +
     (e.instructions && e.instructions.length ? '<div class="exd-sec"><h4>How to do it</h4><ol>' +
       e.instructions.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ol></div>' : '') +
-    (exVideo(e.name) ? '<div class="btn-row"><a class="btn block press" href="' + exVideo(e.name) + '" target="_blank" rel="noopener">' + icon('play', 18) + ' How-to video</a></div>' : '') +
-    '<div class="btn-row"><button class="btn block press" id="ex-add">Add to program</button></div>'
+    ((!isCustom && exVideo(e.name)) ? '<div class="btn-row"><a class="btn block press" href="' + exVideo(e.name) + '" target="_blank" rel="noopener">' + icon('play', 18) + ' How-to video</a></div>' : '') +
+    '<div class="btn-row"><button class="btn block press" id="ex-add">Add to program</button>' +
+    (isCustom ? '<button class="btn ghost press" id="ex-edit">Edit</button>' : '') + '</div>' +
+    (isCustom ? '<div class="btn-row"><button class="btn block danger-line press" id="ex-del">Delete exercise</button></div>' : '')
   );
   document.getElementById('ex-add').onclick = function () { addToProgramSheet(e); };
+  if (isCustom && e.hasVideo) {
+    VideoStore.get(e.id).then(function (blob) {
+      var holder = document.getElementById('exd-video');
+      if (!holder) return;
+      if (blob) {
+        var url = URL.createObjectURL(blob);
+        holder.innerHTML = '<video class="exd-video" controls playsinline preload="metadata" src="' + url + '"></video>';
+      } else {
+        holder.innerHTML = '<p class="sec-sub">Attached video wasn\u2019t found on this device.</p>';
+      }
+    });
+  }
+  if (isCustom) {
+    document.getElementById('ex-edit').onclick = function () {
+      openCustomExerciseForm(e.id, function () { openExerciseSheet(e.id); });
+    };
+    document.getElementById('ex-del').onclick = function () { confirmDeleteCustomExercise(e.id); };
+  }
+}
+
+/* ---------------- custom exercise form (add / edit) ---------------- */
+var CE_MAX_VIDEO = 50 * 1024 * 1024; /* 50MB, device-local */
+function openCustomExerciseForm(editId, afterSave) {
+  var ex = editId ? Store.getCustomExercise(editId) : null;
+  var muscleOpts = Object.keys(MUSCLE_LABEL).map(function (m) {
+    return '<option value="' + esc(m) + '"' + (ex && ex.muscle === m ? ' selected' : '') + '>' + esc(MUSCLE_LABEL[m]) + '</option>';
+  }).join('');
+  var equipOpts = CE_EQUIP.map(function (o) {
+    return '<option value="' + o.id + '"' + (ex && ex.equipment === o.id ? ' selected' : '') + '>' + o.label + '</option>';
+  }).join('');
+  var removeVideo = false;
+  openSheet(
+    '<h3>' + (ex ? 'Edit exercise' : 'New custom exercise') + '</h3>' +
+    '<p class="sub">Saved on this device. Works in programs, logging, and stats like any built-in exercise.</p>' +
+    '<label class="field"><span>Name *</span>' +
+    '<input class="input" id="ce-name" maxlength="80" placeholder="e.g. Landmine press" value="' + esc(ex ? ex.name : '') + '"></label>' +
+    '<label class="field"><span>Primary muscle</span><select class="select" id="ce-muscle">' + muscleOpts + '</select></label>' +
+    '<label class="field"><span>Equipment</span><select class="select" id="ce-equip">' + equipOpts + '</select></label>' +
+    '<label class="field"><span>How to do it <i>(optional)</i></span>' +
+    '<textarea class="textarea" id="ce-notes" rows="4" placeholder="Cues and setup — one step per line">' + esc(ex ? ex.notes : '') + '</textarea></label>' +
+    '<div class="exd-sec"><h4>Video <i>(optional)</i></h4>' +
+    '<label class="field"><span>Paste a link — Instagram, YouTube…</span>' +
+    '<input class="input" id="ce-url" inputmode="url" placeholder="https://…" value="' + esc(ex ? ex.videoUrl : '') + '"></label>' +
+    '<div id="ce-vidrow">' +
+    ((ex && ex.hasVideo)
+      ? '<p class="sec-sub">A video is attached to this exercise.</p>' +
+        '<div class="btn-row"><button type="button" class="btn ghost sm press" id="ce-vid-remove">Remove video</button></div>'
+      : '') +
+    '</div>' +
+    '<label class="field"><span>Or upload from this device</span>' +
+    '<input type="file" id="ce-file" accept="video/*" class="file-in"></label>' +
+    '<p class="sec-sub">Uploads stay on this device only. Max 50MB.</p>' +
+    '<p class="form-err" id="ce-err" style="display:none"></p></div>' +
+    '<div class="btn-row"><button class="btn block press" id="ce-save">' + (ex ? 'Save changes' : 'Add exercise') + '</button></div>'
+  );
+  var rmBtn = document.getElementById('ce-vid-remove');
+  if (rmBtn) rmBtn.onclick = function () {
+    removeVideo = true;
+    document.getElementById('ce-vidrow').innerHTML = '<p class="sec-sub">The attached video will be removed when you save.</p>';
+  };
+  function showErr(msg) {
+    var p = document.getElementById('ce-err');
+    p.textContent = msg; p.style.display = 'block';
+  }
+  document.getElementById('ce-save').onclick = function () {
+    var name = document.getElementById('ce-name').value.trim();
+    if (!name) { showErr('Give your exercise a name.'); document.getElementById('ce-name').focus(); return; }
+    var fileInput = document.getElementById('ce-file');
+    var file = (fileInput.files && fileInput.files[0]) || null;
+    if (file && file.size > CE_MAX_VIDEO) {
+      showErr('That video is over 50MB — trim it down or paste a link instead.');
+      return;
+    }
+    var rec = {
+      id: ex ? ex.id : undefined,
+      name: name,
+      muscle: document.getElementById('ce-muscle').value,
+      equipment: document.getElementById('ce-equip').value,
+      notes: document.getElementById('ce-notes').value.trim(),
+      videoUrl: document.getElementById('ce-url').value.trim(),
+      hasVideo: ex ? ex.hasVideo : false,
+      createdAt: ex ? ex.createdAt : undefined
+    };
+    var saved = Store.saveCustomExercise(rec);
+    function done() {
+      closeSheet();
+      toast(ex ? 'Exercise updated' : '\u201C' + saved.name + '\u201D added');
+      if (afterSave) afterSave(saved); else render();
+    }
+    if (removeVideo) {
+      VideoStore.del(saved.id).then(function () {
+        saved.hasVideo = false;
+        Store.saveCustomExercise(saved);
+        done();
+      });
+    } else if (file) {
+      VideoStore.put(saved.id, file).then(function () {
+        saved.hasVideo = true;
+        Store.saveCustomExercise(saved);
+        done();
+      }, function () {
+        showErr('Couldn\u2019t save that video on this device — the exercise was saved without it.');
+      });
+    } else {
+      done();
+    }
+  };
+}
+
+/* ---------------- delete a custom exercise ---------------- */
+function customExerciseUsage(id, name) {
+  var progs = 0, sets = 0;
+  Store.getPrograms().forEach(function (p) {
+    (p.exercises || []).forEach(function (e) { if (e.dbId === id) progs++; });
+  });
+  Store.getLogs().forEach(function (l) {
+    (l.items || []).forEach(function (it) { if (String(it.exercise) === String(name)) sets++; });
+  });
+  return { programs: progs, sets: sets };
+}
+function confirmDeleteCustomExercise(id) {
+  var ex = Store.getCustomExercise(id);
+  if (!ex) return;
+  var use = customExerciseUsage(id, ex.name);
+  openSheet(
+    '<h3>Delete exercise?</h3>' +
+    '<p class="sub">\u201C' + esc(ex.name) + '\u201D will be removed from your library' +
+    (use.programs ? ' (it\u2019s in <b>' + use.programs + '</b> program exercise' + (use.programs > 1 ? 's' : '') + ' — those keep the name, sets, and reps, just without the saved details)' : '') +
+    '.</p>' +
+    (use.sets
+      ? '<p class="sub">Your ' + use.sets + ' logged set' + (use.sets > 1 ? 's' : '') + ' keep their history under this name — nothing is lost from your logs.</p>'
+      : '<p class="sub">Your workout history is untouched.</p>') +
+    '<div class="btn-row"><button class="btn block danger-line press" id="ce-del-yes">Delete</button></div>' +
+    '<div class="btn-row"><button class="btn block ghost press" id="ce-del-no">Keep it</button></div>'
+  );
+  document.getElementById('ce-del-no').onclick = closeSheet;
+  document.getElementById('ce-del-yes').onclick = function () {
+    Store.deleteCustomExercise(id);
+    VideoStore.del(id);
+    closeSheet();
+    render();
+    toast('Exercise deleted');
+  };
 }
 
 /* "Add to program" — pick a target program or start a new one */
@@ -1089,12 +1447,20 @@ function renderPicker(v) {
       'Tap + to add. Add as many as you want, then Done.') +
     '<div class="search-wrap">' + icon('search', 20) +
     '<input class="input" id="pk-q" type="search" placeholder="Search…" value="' + esc(pk.q) + '"></div>' +
+    '<div class="btn-row" style="margin-top:10px"><button class="btn ghost block press" id="pk-new-custom">' + icon('plus', 18) + ' Create custom exercise</button></div>' +
     '<div id="pk-body"></div>' +
     '<div class="btn-row" style="position:sticky;bottom:0;padding:10px 0;background:var(--th-bg)">' +
     '<button class="btn block press" id="pk-done">Done (' + b.exercises.length + ' in program)</button></div>';
   v.innerHTML = html;
   document.getElementById('back-btn').onclick = function () { b.picking = null; render(); };
   document.getElementById('pk-done').onclick = function () { b.picking = null; render(); };
+  document.getElementById('pk-new-custom').onclick = function () {
+    openCustomExerciseForm(null, function (saved) {
+      b.exercises.push({ dbId: saved.id, name: saved.name, sets: 3, reps: 10 });
+      render();
+      toast(saved.name + ' added to program');
+    });
+  };
   var qi = document.getElementById('pk-q');
   qi.addEventListener('input', function () { pk.q = qi.value; paintPk(); });
   function paintPk() {
@@ -1106,6 +1472,12 @@ function renderPicker(v) {
       var hay = (e.name + ' ' + (e.equipment || '') + ' ' + (e.primaryMuscles || []).join(' ')).toLowerCase();
       return hay.indexOf(qq) >= 0;
     });
+    var cl = CustomEx.all().filter(function (e) {
+      if (!qq) return true;
+      var hay = (e.name + ' ' + (e.equipment || '') + ' ' + (e.primaryMuscles || []).join(' ')).toLowerCase();
+      return hay.indexOf(qq) >= 0;
+    });
+    lst = cl.concat(lst);
     var h = '';
     if (!pk.cat && !qq) {
       var counts = {};
@@ -1122,7 +1494,8 @@ function renderPicker(v) {
     rows.forEach(function (e) {
       var added = b.exercises.some(function (x) { return x.dbId === e.id; });
       h += '<div class="row-card"><span class="t"><b>' + esc(e.name) + '</b>' +
-        '<small>' + esc(lbCatLabel(e.category)) + (e.equipment ? ' · ' + esc(e.equipment) : '') + '</small></span>' +
+        '<small>' + (e.custom ? '<span class="chip custom">Custom</span>' : '') +
+        esc(lbCatLabel(e.category)) + (e.equipment ? ' · ' + esc(equipmentLabel(e.equipment)) : '') + '</small></span>' +
         '<button class="btn sm press" data-addex="' + esc(e.id) + '"' + (added ? ' disabled' : '') + '>' +
         (added ? icon('check', 18) : icon('plus', 18)) + '</button></div>';
     });
@@ -1134,7 +1507,8 @@ function renderPicker(v) {
     });
     body.querySelectorAll('[data-addex]').forEach(function (btn) {
       btn.onclick = function () {
-        var e = EXDB.byId[btn.getAttribute('data-addex')];
+        var aid = btn.getAttribute('data-addex');
+        var e = EXDB.byId[aid] || CustomEx.get(aid);
         if (!e) return;
         b.exercises.push({ dbId: e.id, name: e.name, sets: 3, reps: 10 });
         document.getElementById('pk-done').textContent = 'Done (' + b.exercises.length + ' in program)';

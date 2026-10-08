@@ -166,7 +166,21 @@ a { color: var(--th-primary); }
   background: var(--th-surface-2); color: var(--th-ink-2); border-radius: 7px; padding: 3px 8px;
   margin-right: 5px; white-space: nowrap;
 }
+.chip.custom {
+  background: none; color: var(--th-primary); border: 1.5px solid var(--th-primary);
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
 .row-chev { flex: none; color: var(--th-ink-3); }
+
+/* ── custom exercises ─────────────────────────────────────────── */
+.exd-video { width: 100%; border-radius: 12px; background: #000; max-height: 340px; }
+.form-err { display: block; color: var(--th-danger); font-weight: 600; font-size: 14px; margin: 8px 0 0; }
+.file-in { display: block; width: 100%; font-size: 15px; color: var(--th-ink-2); }
+.file-in::file-selector-button {
+  font: inherit; font-weight: 700; color: var(--th-primary); background: var(--th-surface-2);
+  border: 2px solid var(--th-primary); border-radius: 10px; padding: 10px 16px; margin-right: 10px;
+  min-height: 46px; cursor: pointer;
+}
 
 /* ── Program cards ────────────────────────────────────────────── */
 .prog-card {
