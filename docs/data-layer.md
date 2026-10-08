@@ -100,6 +100,22 @@ This is the entire multi-device story: no accounts, no sync server.
   New Store methods: `getMeasurements`, `saveMeasurement`,
   `deleteMeasurement`.
 
+## Rehab Center
+
+Content lives in `rehab.js` (`REHAB_ROUTINES`: shoulders, hips, ankles,
+knees, prehab), compiled from sports-medicine research Oct 2026 —
+content swaps happen in that file, not in app code. Each routine:
+`{ id, name, tagline, icon, about, exercises[] | blocks[], selftest?,
+progression?, avoid[], redflags[], science }`; exercises carry
+`{ name, sets, reps, freq?, coaching, db }` where `db` is the exact
+exercise-DB name for demos (falls back to text coaching when missing).
+`rehabRoutineBlocks(r)` flattens a routine to log blocks.
+"Add to today's workout" appends `{ type: "rehab" }` blocks to the active
+log session (or starts a rehab session); rehab items save as
+`kind: "rehab"` — excluded from PR tracking and volume math.
+Landing carries the medical disclaimer, the pain-monitoring rule
+(≤3–5/10 OK if settled in 24h), and PEACE & LOVE acute-injury guidance.
+
 ## Sports science
 
 All computed client-side from `logs`. UI labels stay plain-language

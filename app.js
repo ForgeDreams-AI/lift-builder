@@ -428,6 +428,7 @@ var state = {
   histOpen: null,         // open log id in history
   importing: null,        // shared program being imported (#p= link)
   planView: null,         // featured plan id being viewed
+  rehabView: null,        // 'landing' or a rehab routine id
   featFilter: { eq: 'all', style: 'all', days: 'all' },
   progEx: null            // exercise selected for the projected-max trend
 };
@@ -474,6 +475,7 @@ function render() {
   if (state.importing) { renderImport(v); return; }
   if (state.builder) { renderBuilder(v); return; }
   if (state.planView) { renderPlanDetail(v); return; }
+  if (state.rehabView) { renderRehab(v); return; }
   if (state.tab === 'home') renderHome(v);
   else if (state.tab === 'library') renderLibrary(v);
   else if (state.tab === 'programs') renderPrograms(v);
@@ -1272,9 +1274,26 @@ function cardioBlockEl(b, i) {
     '<button type="button" class="btn ghost block press" data-cdone>Mark complete</button>';
   return blk;
 }
+function rehabBlockEl(b, i) {
+  var blk = el('div', 'ex-block rehab-block');
+  blk.setAttribute('data-block', i);
+  var nSets = num(b.sets) || 2;
+  var h = '<div class="ex-head-row"><span class="ex-num">R' + (i + 1) + '</span>' +
+    '<div class="ex-title-wrap"><div class="ex-name"><span class="chip rehab-chip">Rehab</span> ' + esc(b.exercise) + '</div>' +
+    '<div class="ex-scheme">' + b.sets + ' \u00d7 ' + esc(String(b.reps)) + '</div>' +
+    (b.group ? '<div class="n">' + esc(b.group) + '</div>' : '') +
+    (b.coaching ? '<div class="coach-line">' + esc(b.coaching) + '</div>' : '') +
+    '<button type="button" class="tool press" data-rhelp="' + i + '" style="width:auto;height:auto;padding:6px 0;color:var(--th-primary);font-weight:600;font-size:14px">How to do it</button>' +
+    '</div></div>';
+  for (var k = 1; k <= nSets; k++) {
+    h += '<button type="button" class="btn ghost block press rh-set" data-rset>Set ' + k + ' \u2014 mark done</button>';
+  }
+  blk.innerHTML = h;
+  return blk;
+}
 function renderLogSession(v) {
   var s = state.log.session;
-  var html = backbar(s.planKind === 'featured' ? 'Home' : 'Programs') +
+  var html = backbar((s.planKind === 'featured' || s.planKind === 'rehab') ? 'Home' : 'Programs') +
     '<div class="log-head"><div class="log-head-main"><h2>' + esc(s.programName) + '</h2>' +
     '<p class="tagline">' + esc(prettyDate(s.date)) + '</p></div>' +
     '<div class="log-count"><span id="sets-done">0</span><span class="log-total" id="sets-total"></span></div></div>' +
@@ -1296,6 +1315,7 @@ function renderLogSession(v) {
   s.blocks.forEach(function (b, i) {
     if (b.type === 'circuit') body.appendChild(circuitBlockEl(b, i));
     else if (b.type === 'cardio') body.appendChild(cardioBlockEl(b, i));
+    else if (b.type === 'rehab') body.appendChild(rehabBlockEl(b, i));
     else body.appendChild(liftBlockEl(b, i));
   });
   body.addEventListener('input', updateSetCount);
@@ -1336,6 +1356,20 @@ function renderLogSession(v) {
       cdone.classList.toggle('primary', on2);
       return;
     }
+    var rset = e.target && e.target.closest ? e.target.closest('[data-rset]') : null;
+    if (rset) {
+      var on3 = rset.classList.toggle('done');
+      var lbl = rset.textContent.replace(/ — (mark done|done ✓)/, '');
+      rset.innerHTML = esc(lbl) + ' — ' + (on3 ? 'done ✓' : 'mark done');
+      rset.classList.toggle('primary', on3);
+      return;
+    }
+    var rhelp = e.target && e.target.closest ? e.target.closest('[data-rhelp]') : null;
+    if (rhelp) {
+      var rb = s.blocks[+rhelp.getAttribute('data-rhelp')];
+      openExerciseSheet('', rb.db || rb.exercise || '');
+      return;
+    }
   });
   updateSetCount();
 }
@@ -1346,7 +1380,7 @@ function confirmDiscard() {
       return window.confirm('Leave without saving? Your sets will be lost.');
     }
   }
-  if (document.querySelectorAll('#log-body .round.done, #log-body [data-cdone].done').length) {
+  if (document.querySelectorAll('#log-body .round.done, #log-body [data-cdone].done, #log-body [data-rset].done').length) {
     return window.confirm('Leave without saving? Your workout will be lost.');
   }
   return true;
@@ -1384,6 +1418,14 @@ function saveLogSession() {
       if (doneBtn && doneBtn.classList.contains('done')) {
         items.push({ kind: 'cardio', text: b.text, exercise: 'Cardio' });
       }
+      return;
+    }
+    if (b.type === 'rehab') {
+      blk.querySelectorAll('[data-rset].done').forEach(function (btn) {
+        var lbl = btn.textContent.replace(/ — (mark done|done ✓)/, '');
+        var setN = lbl.replace(/[^0-9]/g, '') || '';
+        items.push({ kind: 'rehab', exercise: b.exercise, dbId: b.db || '', set: setN, reps: String(b.reps) });
+      });
       return;
     }
     blk.querySelectorAll('.set-row').forEach(function (sr, si) {
@@ -1439,7 +1481,7 @@ function renderHistory(v) {
 function renderLogDetail(v, id) {
   var l = Store.getLog(id);
   if (!l) { state.histOpen = null; render(); return; }
-  var byEx = {}, order = [], circuits = {}, circOrder = [], cardios = [];
+  var byEx = {}, order = [], circuits = {}, circOrder = [], cardios = [], rehabs = {}, rhOrder = [];
   (l.items || []).forEach(function (it) {
     var kind = it.kind || 'lift';
     if (kind === 'circuit') {
@@ -1447,6 +1489,9 @@ function renderLogDetail(v, id) {
       circuits[it.exercise].push(it);
     } else if (kind === 'cardio') {
       cardios.push(it);
+    } else if (kind === 'rehab') {
+      if (!rehabs[it.exercise]) { rehabs[it.exercise] = []; rhOrder.push(it.exercise); }
+      rehabs[it.exercise].push(it);
     } else {
       if (!byEx[it.exercise]) { byEx[it.exercise] = []; order.push(it.exercise); }
       byEx[it.exercise].push(it);
@@ -1474,6 +1519,12 @@ function renderLogDetail(v, id) {
   cardios.forEach(function (it) {
     html += '<div class="ex-h">Cardio</div><div class="set-line"><span>Done</span><b>' + esc(it.text || '') + '</b></div>';
   });
+  rhOrder.forEach(function (ex) {
+    html += '<div class="ex-h">' + esc(ex) + ' <span class="n">rehab</span></div>';
+    rehabs[ex].forEach(function (it) {
+      html += '<div class="set-line"><span>Set ' + esc(String(it.set)) + '</span><b>' + esc(it.reps || 'done') + '</b></div>';
+    });
+  });
   if (l.note) html += '<div class="ex-h">Note</div><p style="margin:4px 0 0">' + esc(l.note) + '</p>';
   html += '</div><button class="btn danger-line block press" id="hist-del">' + icon('trash', 18) + ' Delete workout</button>';
   v.innerHTML = html;
@@ -1483,6 +1534,132 @@ function renderLogDetail(v, id) {
       Store.deleteLog(id); state.histOpen = null; render(); toast('Workout deleted');
     });
   };
+}
+
+/* ============================================================
+   REHAB CENTER — routines from rehab.js
+   ============================================================ */
+function renderRehab(v) {
+  if (state.rehabView === 'landing') renderRehabLanding(v);
+  else renderRehabDetail(v, state.rehabView);
+}
+function renderRehabLanding(v) {
+  v.innerHTML = '<button class="backlink press" id="rh-back">\u2190 Home</button>' +
+    viewHead('Rehab Center', 'Rehab', 'Evidence-based routines for the aches lifters actually get.') +
+    '<div class="flag warn rh-disclaim">' + esc(REHAB_DISCLAIMER) + '</div>' +
+    '<div id="rh-cards"></div>';
+  document.getElementById('rh-back').onclick = function () { state.rehabView = null; state.tab = 'home'; render(); };
+  var wrap = document.getElementById('rh-cards');
+  REHAB_ROUTINES.forEach(function (r) {
+    var b = el('button', 'row-card press');
+    b.innerHTML = '<span class="row-ico">' + icon(r.icon || 'medal', 22) + '</span>' +
+      '<span class="t"><b>' + esc(r.name) + '</b><small>' + esc(r.tagline) + '</small></span>' +
+      '<span class="row-chev">' + icon('chevR', 20) + '</span>';
+    b.onclick = function () { state.rehabView = r.id; render(); };
+    wrap.appendChild(b);
+  });
+  var pr = el('div', 'card');
+  pr.innerHTML = '<div class="sec-head">' + esc(PAIN_RULE.title) + '</div><p class="sec-sub" style="margin:0">' + esc(PAIN_RULE.body) + '</p>';
+  v.appendChild(pr);
+  var pl = el('div', 'card');
+  var h = '<div class="sec-head">' + esc(PEACE_LOVE.title) + '</div>';
+  h += '<h4>PEACE \u2014 the first days</h4><ul class="rules-list">' +
+    PEACE_LOVE.peace.map(function (x) { return '<li><b>' + esc(x[0]) + ':</b> ' + esc(x[1]) + '</li>'; }).join('') + '</ul>';
+  h += '<h4>LOVE \u2014 after that</h4><ul class="rules-list">' +
+    PEACE_LOVE.love.map(function (x) { return '<li><b>' + esc(x[0]) + ':</b> ' + esc(x[1]) + '</li>'; }).join('') + '</ul>';
+  h += '<p class="sec-sub" style="margin-bottom:0">' + esc(PEACE_LOVE.note) + '</p>';
+  pl.innerHTML = h;
+  v.appendChild(pl);
+}
+function rehabExRow(e) {
+  var row = el('button', 'plan-block press rh-ex');
+  row.innerHTML = '<span class="pb-ico">' + icon('dumbbell', 20) + '</span>' +
+    '<div class="pb-body"><b>' + esc(e.name) + '</b>' +
+    '<span class="n">' + e.sets + ' \u00d7 ' + esc(String(e.reps)) + (e.freq ? ' \u00b7 ' + esc(e.freq) : '') + '</span>' +
+    (e.coaching ? '<span>' + esc(e.coaching) + '</span>' : '') +
+    '<span class="vlink">Demo + how-to</span></div>' +
+    '<span class="row-chev">' + icon('chevR', 20) + '</span>';
+  row.onclick = function () { openExerciseSheet('', e.db || e.name); };
+  return row;
+}
+function renderRehabDetail(v, id) {
+  var r = getRehabRoutine(id);
+  if (!r) { state.rehabView = 'landing'; render(); return; }
+  v.innerHTML = '<button class="backlink press" id="rh-back">\u2190 Rehab Center</button>' +
+    '<div class="plan-hero"><h2>' + esc(r.name) + '</h2><p class="sec-sub">' + esc(r.tagline) + '</p></div>' +
+    '<div class="flag warn rh-disclaim">' + esc(REHAB_DISCLAIMER) + '</div>' +
+    '<div class="card"><p class="sec-sub" style="margin:0">' + esc(r.about) + '</p></div>' +
+    '<div id="rh-body"></div>';
+  document.getElementById('rh-back').onclick = function () { state.rehabView = 'landing'; render(); };
+  var body = document.getElementById('rh-body');
+  function secHead(t) { var d = el('div'); d.innerHTML = '<div class="sec-head">' + esc(t) + '</div>'; body.appendChild(d); }
+  if (r.exercises) {
+    secHead('The routine');
+    r.exercises.forEach(function (e) { body.appendChild(rehabExRow(e)); });
+  }
+  if (r.blocks) {
+    r.blocks.forEach(function (b) {
+      secHead(b.title);
+      b.items.forEach(function (e) { body.appendChild(rehabExRow(e)); });
+    });
+  }
+  if (r.selftest) {
+    var st = el('div', 'card');
+    st.innerHTML = '<div class="sec-head">' + esc(r.selftest.title) + '</div><p class="sec-sub" style="margin:0">' + esc(r.selftest.body) + '</p>';
+    body.appendChild(st);
+  }
+  if (r.progression) {
+    var pg = el('div', 'card');
+    pg.innerHTML = '<div class="sec-head">' + esc(r.progression.title) + '</div><p class="sec-sub" style="margin:0">' + esc(r.progression.body) + '</p>';
+    body.appendChild(pg);
+  }
+  if (r.avoid && r.avoid.length) {
+    var av = el('div', 'card');
+    av.innerHTML = '<div class="sec-head">What to avoid</div><ul class="rules-list">' +
+      r.avoid.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>';
+    body.appendChild(av);
+  }
+  if (r.redflags && r.redflags.length) {
+    var rf = el('div', 'card rh-red');
+    rf.innerHTML = '<div class="sec-head">Red flags \u2014 see a professional</div><ul class="rules-list">' +
+      r.redflags.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>';
+    body.appendChild(rf);
+  }
+  if (r.science) {
+    var sc = el('div', 'card');
+    sc.innerHTML = '<div class="sec-head">The science underneath</div><p class="sec-sub" style="margin:0">' + esc(r.science) + '</p>';
+    body.appendChild(sc);
+  }
+  var cta = el('div', 'btn-row sticky-cta');
+  cta.innerHTML = '<button class="btn primary block press" id="rh-add">Add to today\u2019s workout</button>';
+  body.appendChild(cta);
+  document.getElementById('rh-add').onclick = function () { addRehabToWorkout(r.id); };
+}
+function addRehabToWorkout(routineId) {
+  var r = getRehabRoutine(routineId);
+  if (!r) return;
+  var blocks = rehabRoutineBlocks(r);
+  if (state.log.session && state.log.session.blocks) {
+    state.log.session.blocks = state.log.session.blocks.concat(blocks);
+    state.log.view = 'session';
+    state.tab = 'log';
+    render();
+    toast('Added to today\u2019s workout');
+  } else {
+    stopLogTimer();
+    state.log.view = 'session';
+    state.log.session = {
+      programId: 'rehab-' + r.id,
+      programName: 'Rehab \u2014 ' + r.name,
+      planKind: 'rehab',
+      date: todayStr(),
+      blocks: blocks,
+      note: ''
+    };
+    state.tab = 'log';
+    render();
+    toast('Rehab session started');
+  }
 }
 
 /* ============================================================
@@ -2266,6 +2443,15 @@ function renderHome(v) {
 
   // active plan card
   renderPlanCard(v);
+
+  // rehab center promo
+  var rh = el('button', 'rehab-home press');
+  rh.innerHTML = '<span class="row-ico">' + icon('medal', 24) + '</span>' +
+    '<span class="t"><b>Rehab Center</b>' +
+    '<small>Shoulders · Hips · Ankles · Knees · Prehab — evidence-based routines</small></span>' +
+    '<span class="row-chev">' + icon('chevR', 20) + '</span>';
+  rh.onclick = function () { state.rehabView = 'landing'; render(); };
+  v.appendChild(rh);
 
   // analytics
   if (!s.totalWorkouts) {

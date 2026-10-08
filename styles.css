@@ -4,43 +4,24 @@
    Inter body, Barlow Condensed display headings. No emoji — SVG only. */
 
 :root {
-  --th-primary: #E8590C;
-  --th-primary-deep: #9A3412;
-  --th-accent: #FFD43B;
-  --th-accent-soft: #FFF3D6;
+  --th-primary: #D9202E;
+  --th-primary-deep: #8F1220;
+  --th-accent: #D9202E;
+  --th-accent-soft: #FDECEA;
   --th-success: #1E8A4C;
-  --th-danger: #D64545;
+  --th-danger: #D9202E;
   --th-info: #2E86C1;
-  --th-bg: #FAF8F5;
+  --th-bg: #FFFFFF;
   --th-surface: #FFFFFF;
-  --th-surface-2: #F0EBE3;
-  --th-ink: #211D19;
-  --th-ink-2: #5C564D;
-  --th-ink-3: #A39A8B;
-  --th-line: #E7DFD2;
-  --th-shadow: 0 2px 14px rgba(33, 29, 25, 0.08);
+  --th-surface-2: #F4F4F5;
+  --th-ink: #0B0B0C;
+  --th-ink-2: #3F3F46;
+  --th-ink-3: #8E8E93;
+  --th-line: #E4E4E7;
+  --th-shadow: 0 2px 14px rgba(0, 0, 0, 0.08);
   --th-tabbar: rgba(255, 255, 255, 0.96);
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --th-primary: #FF8A3D;
-    --th-primary-deep: #C2410C;
-    --th-accent: #FFD43B;
-    --th-accent-soft: rgba(255, 212, 59, 0.14);
-    --th-success: #4FD07A;
-    --th-danger: #FF6A5E;
-    --th-info: #4FA8E8;
-    --th-bg: #171310;
-    --th-surface: #211C17;
-    --th-surface-2: #2D2620;
-    --th-ink: #F5EFE4;
-    --th-ink-2: #BCAF9C;
-    --th-ink-3: #7E7466;
-    --th-line: #37302A;
-    --th-shadow: 0 2px 16px rgba(0, 0, 0, 0.45);
-    --th-tabbar: rgba(33, 28, 23, 0.96);
-  }
-}
+/* Theme is always clean white / red / black — no dark-mode override. */
 
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
@@ -502,3 +483,23 @@ a { color: var(--th-primary); }
 .ms-delta { font-size: 13px; font-weight: 700; margin: 2px 0 6px; color: var(--th-ink-3); }
 .ms-delta.up { color: var(--th-success); }
 .ms-delta.down { color: var(--th-primary); }
+
+/* ── Rehab Center ─────────────────────────────────────────────── */
+.rehab-home {
+  display: flex; align-items: center; gap: 14px; width: 100%; text-align: left;
+  background: var(--th-surface); border: 1px solid var(--th-line); border-left: 4px solid var(--th-primary);
+  border-radius: 16px; padding: 16px; margin: 14px 0; cursor: pointer; color: var(--th-ink);
+}
+.rehab-home .row-ico { color: var(--th-primary); }
+.rehab-home .t { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.rehab-home .t b { font-size: 19px; }
+.rehab-home .t small { color: var(--th-ink-2); font-size: 13.5px; }
+.rh-disclaim { margin: 12px 0; }
+.rh-red { border-left: 4px solid var(--th-danger); }
+.rh-ex { width: 100%; text-align: left; cursor: pointer; color: var(--th-ink); margin: 8px 0; }
+.rh-ex .row-chev { margin-left: auto; color: var(--th-ink-3); flex-shrink: 0; }
+.chip.rehab-chip { background: var(--th-primary); color: #fff; border: 0; font-size: 11px; padding: 3px 8px; border-radius: 20px; margin-right: 6px; vertical-align: 2px; }
+.rh-set { margin-top: 8px; }
+.rh-set.done { border-color: var(--th-success); color: var(--th-success); }
+.card h4 { margin: 14px 0 6px; font-size: 15px; }
+.card h4:first-of-type { margin-top: 6px; }
