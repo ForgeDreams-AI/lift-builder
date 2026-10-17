@@ -1255,12 +1255,15 @@ function renderPlanBlockRow(b) {
     row.innerHTML = '<span class="pb-ico">' + icon('dumbbell', 20) + '</span>' +
       '<div class="pb-body"><b>' + esc(b.exercise) + '</b>' +
       '<span class="n">' + b.sets + ' \u00d7 ' + esc(b.reps) + '</span>' +
+      (b.warmup ? '<span class="n warmup-line">Warm-up: ' + esc(b.warmup) + '</span>' : '') +
       (vid ? ' <a class="vlink" href="' + vid + '" target="_blank" rel="noopener">How-to video</a>' : '') + '</div>';
     row.onclick = function () { openExerciseSheet(b.dbId, b.exercise); };
   } else if (b.type === 'circuit') {
     var lis = b.exercises.map(function (e) { return '<li>' + esc(e.exercise) + ' \u2014 ' + esc(e.reps) + '</li>'; }).join('');
     row.innerHTML = '<span class="pb-ico">' + icon('flame', 20) + '</span>' +
-      '<div class="pb-body"><b>' + esc(b.title) + ' \u00d7 ' + b.rounds + ' rounds</b><ul class="pb-list">' + lis + '</ul></div>';
+      '<div class="pb-body"><b>' + esc(b.title) + ' \u00d7 ' + b.rounds + ' rounds</b>' +
+      (b.warmupNote ? '<span class="n warmup-line">' + esc(b.warmupNote) + '</span>' : '') +
+      '<ul class="pb-list">' + lis + '</ul></div>';
   } else {
     row.innerHTML = '<span class="pb-ico">' + icon('play', 20) + '</span>' +
       '<div class="pb-body"><b>Cardio</b><span>' + esc(b.text) + '</span></div>';
@@ -1689,6 +1692,7 @@ function liftBlockEl(b, i) {
     '<div class="ex-head-row"><span class="ex-num">' + ('0' + (i + 1)).slice(-2) + '</span>' +
     '<div class="ex-title-wrap"><div class="ex-name">' + dayChip + ' ' + esc(b.exercise) + '</div>' +
     '<div class="ex-scheme">' + (b.sets || 3) + ' × ' + esc(String(b.reps)) + (db ? ' · ' + esc(lbCatLabel(db.category)) : '') + '</div>' +
+    (b.warmup ? '<div class="warmup-line">Warm-up: ' + esc(b.warmup) + '</div>' : '') +
     '<button type="button" class="tool press" data-help="' + i + '" style="width:auto;height:auto;padding:6px 0;color:var(--th-primary);font-weight:600;font-size:14px">How to do it</button>' +
     (coach.line ? '<div class="coach-line">' + esc(coach.line) + '</div>' : '') +
     (coach.e1rm ? '<div class="projmax-line">Projected max: <b>' + Math.round(coach.e1rm) + ' lb</b></div>' : '') +
@@ -1703,7 +1707,8 @@ function circuitBlockEl(b, i) {
   blk.setAttribute('data-block', i);
   var h = '<div class="ex-head-row"><span class="ex-num">C' + (i + 1) + '</span>' +
     '<div class="ex-title-wrap"><div class="ex-name">' + esc(b.title || 'Circuit') + '</div>' +
-    '<div class="ex-scheme">' + b.rounds + ' rounds · 60\u2013120s rest between rounds</div></div></div>';
+    '<div class="ex-scheme">' + b.rounds + ' rounds · 60\u2013120s rest between rounds</div>' +
+    (b.warmupNote ? '<div class="warmup-line">' + esc(b.warmupNote) + '</div>' : '') + '</div></div>';
   for (var r = 1; r <= b.rounds; r++) {
     h += '<div class="round" data-round="' + r + '"><div class="round-head"><span>Round ' + r + '</span>' +
       '<button type="button" class="btn ghost sm press round-done" data-rdone>Mark done</button></div>';

@@ -19,8 +19,10 @@ Static data in `plans.js` (`FEATURED_PLANS`, ids `plan-1`…`plan-48`),
 4 equipment categories × 3 styles × 4 schedules (2/3/4/5 days/week).
 Each plan: `{ id, num, equipment, equipmentShort, style, styleShort,
 daysPerWeek, name, title, days: [{ name, blocks: [...] }] }` where a block
-is `{ type: "lift", exercise, dbId, sets, reps }`,
-`{ type: "circuit", title, rounds, exercises: [{ exercise, dbId, reps }] }`,
+is `{ type: "lift", exercise, dbId, sets, reps, warmup? }`
+(`warmup` is the prescribed warm-up, e.g. `"2×5 @ 60%"`, `"1×5 @ 60%"`,
+`"1×8 easy"` — present on compound lifts only, never on accessories),
+`{ type: "circuit", title, rounds, exercises: [{ exercise, dbId, reps }], warmupNote? }`,
 or `{ type: "cardio", text }`. `PLAN_RULES` holds the rest/warm-up guidance
 shown on every plan detail page. Featured plans are read-only in the UI;
 "Duplicate to My Programs" flattens their lift blocks into an editable
