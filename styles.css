@@ -549,3 +549,37 @@ a { color: var(--th-primary); }
 .pick-box { background: var(--th-surface); border: 1px solid var(--th-line); border-radius: 14px; padding: 14px 12px; min-height: 56px; font-size: 15px; font-weight: 700; color: var(--th-ink); text-align: center; box-shadow: var(--th-shadow); cursor: pointer; }
 .pick-box small { display: block; font-size: 12px; font-weight: 600; color: var(--th-ink-3); margin-top: 2px; }
 .pick-box.on { border: 2px solid var(--th-primary); color: var(--th-primary); padding: 13px 11px; }
+
+/* ---------------- Goal planner ---------------- */
+.gp-wrap { padding: 20px 16px 32px; max-width: 640px; margin: 0 auto; }
+.gp-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.gp-wrap h2 { margin: 4px 0 8px; font-size: 30px; letter-spacing: -.02em; }
+.gp-field { display: flex; align-items: center; gap: 12px; margin: 10px 0; }
+.gp-field > span { width: 128px; flex: none; font-size: 13px; color: var(--th-dim); }
+.gp-field .input { flex: 1; }
+.gp-nav { margin-top: 22px; }
+.gp-phys { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
+.gp-opt { background: var(--th-surface); border: 2px solid var(--th-border); border-radius: 12px; padding: 12px 8px; cursor: pointer; color: var(--th-ink); display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 15px; font-weight: 700; }
+.gp-opt .gp-svg { width: 84px; height: 112px; color: var(--th-dim); }
+.gp-opt .gp-svg svg { width: 100%; height: 100%; fill: currentColor; }
+.gp-opt.sel { border-color: var(--th-accent); }
+.gp-opt.sel .gp-svg { color: var(--th-accent); }
+.gp-eq { display: grid; gap: 10px; margin-top: 8px; }
+.gp-pick { display: flex; align-items: center; gap: 12px; text-align: left; background: var(--th-surface); border: 2px solid var(--th-border); border-radius: 12px; padding: 14px; cursor: pointer; color: var(--th-ink); width: 100%; }
+.gp-pick .t { display: flex; flex-direction: column; gap: 2px; }
+.gp-pick .t small { color: var(--th-dim); font-size: 13px; font-weight: 400; }
+.gp-pick.sel { border-color: var(--th-accent); }
+.gp-days { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 12px; }
+.gp-day { background: var(--th-surface); border: 2px solid var(--th-border); border-radius: 12px; padding: 14px 6px; font-size: 20px; font-weight: 800; color: var(--th-ink); cursor: pointer; display: flex; flex-direction: column; align-items: center; }
+.gp-day small { font-size: 11px; font-weight: 400; color: var(--th-dim); }
+.gp-day.sel { border-color: var(--th-accent); }
+.gp-goals { display: grid; gap: 10px; margin-top: 8px; }
+.gp-plan { margin: 14px 0; }
+.gp-logform { display: grid; gap: 4px; margin-top: 12px; border-top: 1px solid var(--th-border); padding-top: 8px; }
+.ck-list { margin-top: 12px; border-top: 1px solid var(--th-border); padding-top: 4px; }
+.ck-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; font-size: 13px; border-bottom: 1px solid var(--th-border); }
+.ck-row:last-child { border-bottom: none; }
+.ck-row span:first-child { color: var(--th-dim); }
+.ck-row strong.ck-done { color: #2e9e5b; }
+.ck-row strong.ck-tried { color: #b8860b; }
+.ck-row span:last-child { margin-left: auto; color: var(--th-dim); }

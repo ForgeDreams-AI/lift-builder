@@ -8,7 +8,7 @@ simple.
 
 | Key | Contents |
 |---|---|
-| `liftBuilder.v1` | `{ programs: [...], logs: [...], activePlan: {...} | null, measurements: [...], customExercises: [...] }` — the entire user store |
+| `liftBuilder.v1` | `{ programs: [...], logs: [...], activePlan: {...} | null, measurements: [...], customExercises: [...], goalPlan: {...} | null, challenge10k: [...] }` — the entire user store. `goalPlan` is the goal-planner quiz result (`{ name, height, weight, waist, now, want, goal, goalLabel, deadline, weeks, waistTarget, planId, planTitle, createdAt }`); `challenge10k` is treadmill-10K attempt logs (`{ id, date, completed, steps, createdAt }`) |
 | `liftBuilder.exdb.v1` | `{ at, data: [...] }` — cached free-exercise-db (876 exercises, ~1MB), refetched when missing/stale |
 | `liftBuilder.profile.v1` | `{ name: "..." }` — display name from onboarding, editable in settings |
 | IndexedDB `liftBuilder.v1` → `customVideos` | uploaded demo-video blobs for custom exercises, keyed by exercise id (device-local, 50MB cap) |

@@ -135,7 +135,7 @@ var Store = (function () {
   var KEY = 'liftBuilder.v1';
   var EXDB_KEY = 'liftBuilder.exdb.v1';
 
-  function blank() { return { programs: [], logs: [], activePlan: null, measurements: [], customExercises: [] }; }
+  function blank() { return { programs: [], logs: [], activePlan: null, measurements: [], customExercises: [], goalPlan: null, challenge10k: [] }; }
   function read() {
     try {
       var raw = localStorage.getItem(KEY);
@@ -147,7 +147,9 @@ var Store = (function () {
         logs: Array.isArray(p.logs) ? p.logs : [],
         activePlan: (p.activePlan && typeof p.activePlan === 'object') ? p.activePlan : null,
         measurements: Array.isArray(p.measurements) ? p.measurements : [],
-        customExercises: Array.isArray(p.customExercises) ? p.customExercises : []
+        customExercises: Array.isArray(p.customExercises) ? p.customExercises : [],
+        goalPlan: (p.goalPlan && typeof p.goalPlan === 'object') ? p.goalPlan : null,
+        challenge10k: Array.isArray(p.challenge10k) ? p.challenge10k : []
       };
     } catch (e) { return blank(); }
   }
@@ -335,6 +337,21 @@ var Store = (function () {
       write(s);
     },
     clearActivePlan: function () { var s = read(); s.activePlan = null; write(s); },
+    /* ---- goal planner: quiz result + targets ---- */
+    getGoalPlan: function () { return read().goalPlan || null; },
+    setGoalPlan: function (gp) { var s = read(); s.goalPlan = gp || null; write(s); },
+    clearGoalPlan: function () { var s = read(); s.goalPlan = null; write(s); },
+    /* ---- treadmill 10K challenge attempts ---- */
+    getChallenge10k: function () {
+      return (read().challenge10k || []).slice().sort(function (a, b) {
+        return String(a.date).localeCompare(String(b.date));
+      });
+    },
+    addChallenge10k: function (a) {
+      var s = read(); a = a || {};
+      a.id = String(a.id || uid()); a.createdAt = a.createdAt || Date.now();
+      s.challenge10k = (s.challenge10k || []).concat([a]); write(s); return a;
+    },
     /* ---- profile (name for the home greeting) ---- */
     getName: function () {
       try {
@@ -639,6 +656,7 @@ function render() {
   if (state.builder) { renderBuilder(v); return; }
   if (state.planView) { renderPlanDetail(v); return; }
   if (state.rehabView) { renderRehab(v); return; }
+  if (state.gpView) { renderGoalPlan(v); return; }
   if (state.tab === 'home') renderHome(v);
   else if (state.tab === 'library') renderLibrary(v);
   else if (state.tab === 'programs') renderPrograms(v);
@@ -2935,6 +2953,284 @@ function renderPlanCard(v) {
 }
 
 /* ---------- home render ---------- */
+/* ============================================================
+   GOAL PLANNER — quiz funnel: basics → physique now → physique
+   want → equipment/days → goal + timeline → matched featured plan.
+   ============================================================ */
+var GP_PHYSIQUES = [
+  { id: 'slim', label: 'Slim',
+    svg: '<svg viewBox="0 0 120 160"><circle cx="60" cy="20" r="11"/><path d="M44 40 Q60 34 76 40 L72 78 Q70 96 68 104 L70 148 L50 148 L52 104 Q50 96 48 78 Z"/><rect x="35" y="44" width="8" height="52" rx="4"/><rect x="77" y="44" width="8" height="52" rx="4"/></svg>' },
+  { id: 'average', label: 'Average',
+    svg: '<svg viewBox="0 0 120 160"><circle cx="60" cy="20" r="11"/><path d="M38 40 Q60 32 82 40 L78 78 Q76 98 74 106 L76 148 L44 148 L46 106 Q44 98 42 78 Z"/><rect x="29" y="44" width="10" height="54" rx="5"/><rect x="81" y="44" width="10" height="54" rx="5"/></svg>' },
+  { id: 'stocky', label: 'Stocky',
+    svg: '<svg viewBox="0 0 120 160"><circle cx="60" cy="20" r="11"/><path d="M38 42 Q60 34 82 42 L84 80 Q84 100 82 108 L80 148 L40 148 L38 108 Q36 100 36 80 Z"/><rect x="27" y="46" width="10" height="52" rx="5"/><rect x="83" y="46" width="10" height="52" rx="5"/></svg>' },
+  { id: 'built', label: 'Built',
+    svg: '<svg viewBox="0 0 120 160"><circle cx="60" cy="20" r="11"/><path d="M32 40 Q60 30 88 40 L78 76 Q74 94 72 102 L74 148 L46 148 L48 102 Q46 94 42 76 Z"/><rect x="21" y="44" width="13" height="56" rx="6"/><rect x="86" y="44" width="13" height="56" rx="6"/></svg>' }
+];
+var GP_ORDER = { slim: 0, average: 1, stocky: 2, built: 3 };
+var GP_GOALS = {
+  lose:   { label: 'Lose fat',     style: 'Strength + Cardio',            blurb: 'Lift to keep muscle, cardio to burn fat.' },
+  build:  { label: 'Build muscle', style: 'Traditional Strength Training', blurb: 'Classic sets × reps. Eat to grow.' },
+  recomp: { label: 'Recomp',       style: 'Strength + Cardio',            blurb: 'Trade fat for muscle at the same weight.' }
+};
+var GP_TIMER_URL = 'https://muse.ai/s/treadmill-timer-xoxb6axmxqavwog';
+
+function gpStart() { state.gp = { step: 1 }; state.gpView = true; render(); }
+function gpClose() { state.gp = null; state.gpView = false; render(); }
+function gpNum(v) { v = String(v == null ? '' : v).trim(); if (v === '' || isNaN(Number(v))) return 0; return Number(v); }
+function gpPhysLabel(id) {
+  for (var i = 0; i < GP_PHYSIQUES.length; i++) if (GP_PHYSIQUES[i].id === id) return GP_PHYSIQUES[i].label;
+  return '';
+}
+/* Suggest the goal: waist over half your height always means lose first;
+   otherwise compare the now → want physiques. */
+function gpSuggestGoal() {
+  var g = state.gp;
+  var ratio = (g.waist && g.height) ? g.waist / g.height : 0;
+  if (ratio >= 0.5) return 'lose';
+  var d = (GP_ORDER[g.want] == null || GP_ORDER[g.now] == null) ? 0 : GP_ORDER[g.want] - GP_ORDER[g.now];
+  if (d < 0) return 'lose';
+  if (d > 0) return 'build';
+  return 'recomp';
+}
+function gpMatchPlan() {
+  var g = state.gp;
+  var style = GP_GOALS[g.goal].style;
+  var c = featPlansFor(g.equipment, style).filter(function (p) { return p.daysPerWeek === g.days; });
+  if (!c.length) c = featPlansFor(g.equipment, style);
+  if (!c.length) c = featPlansFor(g.equipment, null).filter(function (p) { return p.daysPerWeek === g.days; });
+  if (!c.length) c = FEATURED_PLANS.filter(function (p) { return p.daysPerWeek === g.days; });
+  return c[0] || FEATURED_PLANS[0];
+}
+function gpWeeks() {
+  var g = state.gp;
+  if (!g.deadline) return 8;
+  var d = diffDays(todayStr(), g.deadline);
+  if (!(d > 0)) return 8;
+  return Math.max(1, Math.min(12, Math.ceil(d / 7)));
+}
+function gpShell(stepLabel, title, sub) {
+  return '<div class="gp-wrap"><div class="gp-top"><span class="kicker">' + esc(stepLabel) + '</span>' +
+    '<button class="btn ghost iconbtn press" id="gp-x" aria-label="Close">' + icon('x', 18) + '</button></div>' +
+    '<h2>' + esc(title) + '</h2>' + (sub ? '<p class="sec-sub">' + esc(sub) + '</p>' : '');
+}
+function gpNav(backStep, nextLabel, nextId) {
+  var h = '<div class="btn-row gp-nav">';
+  if (backStep) h += '<button class="btn ghost press" id="gp-back">Back</button>';
+  h += '<button class="btn press" id="' + nextId + '">' + esc(nextLabel) + '</button></div></div>';
+  return h;
+}
+function gpField(label, unit, id, val, placeholder) {
+  return '<label class="gp-field"><span>' + esc(label) + (unit ? ' (' + esc(unit) + ')' : '') + '</span>' +
+    '<input class="input" id="' + id + '" type="number" inputmode="decimal" min="0" step="0.25" value="' + esc(val || '') + '" placeholder="' + esc(placeholder || '') + '"></label>';
+}
+function renderGoalPlan(v) {
+  var g = state.gp;
+  if (!g) { gpClose(); return; }
+  var html = '';
+  if (g.step === 1) {
+    html = gpShell('Step 1 of 5', 'The basics', 'Four numbers and your name — that\u2019s all we need to set your targets.') +
+      '<label class="gp-field"><span>Your name</span><input class="input" id="gp-name" type="text" value="' + esc(g.name || '') + '" placeholder="e.g. Alex"></label>' +
+      gpField('Height', 'in', 'gp-height', g.height, 'e.g. 72') +
+      gpField('Weight', 'lb', 'gp-weight', g.weight, 'e.g. 195') +
+      gpField('Waist at navel', 'in', 'gp-waist', g.waist, 'e.g. 34') +
+      '<p class="sec-sub">Waist target is simple: keep it under half your height. At 72\u2033 tall, that\u2019s 36\u2033.</p>' +
+      gpNav(0, 'Continue', 'gp-next');
+    v.innerHTML = html;
+    document.getElementById('gp-x').onclick = gpClose;
+    document.getElementById('gp-next').onclick = function () {
+      g.name = document.getElementById('gp-name').value.trim();
+      g.height = gpNum(document.getElementById('gp-height').value);
+      g.weight = gpNum(document.getElementById('gp-weight').value);
+      g.waist = gpNum(document.getElementById('gp-waist').value);
+      g.step = 2; render();
+    };
+  } else if (g.step === 2 || g.step === 3) {
+    var isNow = g.step === 2, key = isNow ? 'now' : 'want';
+    html = gpShell('Step ' + g.step + ' of 5',
+      isNow ? 'Which looks most like you now?' : 'Which do you want to look like?',
+      isNow ? 'Be honest — this is just the starting point.' : 'Pick the target. This sets your goal.') +
+      '<div class="gp-phys">';
+    GP_PHYSIQUES.forEach(function (p) {
+      html += '<button class="gp-opt press' + (g[key] === p.id ? ' sel' : '') + '" data-p="' + p.id + '">' +
+        '<span class="gp-svg">' + p.svg + '</span><span>' + esc(p.label) + '</span></button>';
+    });
+    html += '</div>' + gpNav(g.step - 1, 'Continue', 'gp-next');
+    v.innerHTML = html;
+    document.getElementById('gp-x').onclick = gpClose;
+    v.querySelectorAll('.gp-opt').forEach(function (b) {
+      b.onclick = function () {
+        g[key] = b.getAttribute('data-p');
+        v.querySelectorAll('.gp-opt').forEach(function (x) { x.classList.toggle('sel', x === b); });
+      };
+    });
+    document.getElementById('gp-back').onclick = function () { g.step = g.step - 1; render(); };
+    document.getElementById('gp-next').onclick = function () {
+      if (!g[key]) { toast('Pick one to continue.'); return; }
+      g.step = g.step + 1; render();
+    };
+  } else if (g.step === 4) {
+    html = gpShell('Step 4 of 5', 'Your setup', 'Where do you train, and how many days a week?') +
+      '<div class="gp-eq">';
+    FEAT_EQUIP.forEach(function (e) {
+      html += '<button class="gp-pick press' + (g.equipment === e.id ? ' sel' : '') + '" data-e="' + esc(e.id) + '">' +
+        '<span class="row-ico">' + icon(e.icon, 22) + '</span><span class="t"><b>' + esc(e.short) + '</b><small>' + esc(e.blurb) + '</small></span></button>';
+    });
+    html += '</div><div class="gp-days">';
+    FEAT_DAYS.forEach(function (d) {
+      html += '<button class="gp-day press' + (g.days === d ? ' sel' : '') + '" data-d="' + d + '">' + d + '<small>/wk</small></button>';
+    });
+    html += '</div>' + gpNav(3, 'Continue', 'gp-next');
+    v.innerHTML = html;
+    document.getElementById('gp-x').onclick = gpClose;
+    v.querySelectorAll('.gp-pick').forEach(function (b) {
+      b.onclick = function () {
+        g.equipment = b.getAttribute('data-e');
+        v.querySelectorAll('.gp-pick').forEach(function (x) { x.classList.toggle('sel', x === b); });
+      };
+    });
+    v.querySelectorAll('.gp-day').forEach(function (b) {
+      b.onclick = function () {
+        g.days = parseInt(b.getAttribute('data-d'), 10);
+        v.querySelectorAll('.gp-day').forEach(function (x) { x.classList.toggle('sel', x === b); });
+      };
+    });
+    document.getElementById('gp-back').onclick = function () { g.step = 3; render(); };
+    document.getElementById('gp-next').onclick = function () {
+      if (!g.equipment) { toast('Pick where you train.'); return; }
+      if (!g.days) { toast('Pick days per week.'); return; }
+      g.goal = gpSuggestGoal();
+      if (!g.deadline) g.deadline = addDays(todayStr(), 84);
+      g.step = 5; render();
+    };
+  } else if (g.step === 5) {
+    var sug = gpSuggestGoal();
+    html = gpShell('Step 5 of 5', 'Your goal', 'We\u2019d suggest this — change it if we\u2019re wrong.') +
+      '<div class="gp-goals">';
+    Object.keys(GP_GOALS).forEach(function (k) {
+      var gg = GP_GOALS[k];
+      html += '<button class="gp-pick press' + (g.goal === k ? ' sel' : '') + '" data-g="' + k + '">' +
+        '<span class="t"><b>' + esc(gg.label) + (k === sug ? ' · recommended' : '') + '</b><small>' + esc(gg.blurb) + '</small></span></button>';
+    });
+    html += '</div><label class="gp-field"><span>Deadline</span><input class="input" id="gp-deadline" type="date" value="' + esc(g.deadline || '') + '"></label>' +
+      gpNav(4, 'See my plan', 'gp-next');
+    v.innerHTML = html;
+    document.getElementById('gp-x').onclick = gpClose;
+    v.querySelectorAll('.gp-pick').forEach(function (b) {
+      b.onclick = function () {
+        g.goal = b.getAttribute('data-g');
+        v.querySelectorAll('.gp-pick').forEach(function (x) { x.classList.toggle('sel', x === b); });
+      };
+    });
+    document.getElementById('gp-back').onclick = function () { g.step = 4; render(); };
+    document.getElementById('gp-next').onclick = function () {
+      g.deadline = document.getElementById('gp-deadline').value || '';
+      if (!g.goal) { toast('Pick a goal.'); return; }
+      g.step = 6; render();
+    };
+  } else {
+    var plan = gpMatchPlan(), weeks = gpWeeks();
+    var wt = g.height ? Math.round(g.height * 0.5 * 10) / 10 : 0;
+    var left = g.deadline ? diffDays(todayStr(), g.deadline) : null;
+    html = gpShell('Your plan', GP_GOALS[g.goal].label,
+      'Built from your answers — ' + gpPhysLabel(g.now) + ' → ' + gpPhysLabel(g.want) + '.') +
+      '<div class="card gp-plan"><span class="kicker">Matched program</span><h3>' + esc(plan.title) + '</h3>' +
+      '<p class="sec-sub">' + plan.daysPerWeek + ' days/week · ' + esc(featEqShort(plan.equipment)) + ' · ' + esc(featStyleShort(plan.style)) + '</p>' +
+      '<div class="btn-row"><button class="btn ghost press" id="gp-preview">Preview program</button></div></div>' +
+      '<div class="card"><span class="kicker">Targets</span>' +
+      (wt ? '<p class="sec-sub">Waist target: under ' + wt + ' in (half your height)</p>' : '') +
+      (g.deadline ? '<p class="sec-sub">' + weeks + ' weeks · deadline ' + esc(prettyDate(g.deadline)) + '</p>' : '<p class="sec-sub">No deadline set.</p>') +
+      '</div>' +
+      '<div class="btn-row gp-nav"><button class="btn ghost press" id="gp-back">Back</button>' +
+      '<button class="btn press" id="gp-go">Start my plan</button></div></div>';
+    v.innerHTML = html;
+    document.getElementById('gp-x').onclick = gpClose;
+    document.getElementById('gp-back').onclick = function () { g.step = 5; render(); };
+    document.getElementById('gp-preview').onclick = function () { state.gpView = false; openPlanDetail(plan.id); };
+    document.getElementById('gp-go').onclick = gpFinish;
+  }
+}
+function gpFinish() {
+  var g = state.gp;
+  if (!g) { gpClose(); return; }
+  var plan = gpMatchPlan(), weeks = gpWeeks();
+  if (g.name) Store.setName(g.name);
+  Store.setActivePlan({ programId: plan.id, kind: 'featured', startDate: todayStr(), weeks: weeks });
+  Store.setGoalPlan({
+    name: g.name || '', height: g.height || 0, weight: g.weight || 0, waist: g.waist || 0,
+    now: g.now || '', want: g.want || '', goal: g.goal, goalLabel: GP_GOALS[g.goal].label,
+    deadline: g.deadline || '', weeks: weeks,
+    waistTarget: g.height ? Math.round(g.height * 0.5 * 10) / 10 : 0,
+    planId: plan.id, planTitle: plan.title, createdAt: Date.now()
+  });
+  if (g.weight || g.waist || g.height) {
+    var m = { date: todayStr(), note: 'Goal plan start' };
+    if (g.weight) m.weight = g.weight;
+    if (g.waist) m.waist = g.waist;
+    if (g.height) m.height = g.height;
+    Store.saveMeasurement(m);
+  }
+  state.gp = null; state.gpView = false; state.tab = 'home';
+  render(); toast('Your plan is locked in. Let\u2019s work.');
+}
+
+/* ---- Home: goal card + 10K challenge card ---- */
+function renderGoalHomeCard(v) {
+  var gp = Store.getGoalPlan();
+  var card = el('div', 'card');
+  if (!gp) {
+    card.innerHTML = '<span class="kicker">Goal planner</span><h3>Build my goal plan</h3>' +
+      '<p class="sec-sub">Five quick questions — get a matched program, a timeline, and simple targets.</p>' +
+      '<div class="btn-row"><button class="btn press" id="gp-start">Start the quiz</button></div>';
+    v.appendChild(card);
+    document.getElementById('gp-start').onclick = gpStart;
+    return;
+  }
+  var ms = Store.getMeasurements().filter(function (m) { return m.waist != null; });
+  var curWaist = ms.length ? ms[ms.length - 1].waist : gp.waist;
+  var left = gp.deadline ? diffDays(todayStr(), gp.deadline) : null;
+  var waistTxt = (curWaist && gp.waistTarget) ?
+    'Waist ' + curWaist + ' in · target under ' + gp.waistTarget + ' in' : 'Waist target under ' + gp.waistTarget + ' in';
+  card.innerHTML = '<span class="kicker">My goal</span><h3>' + esc(gp.goalLabel) + '</h3>' +
+    '<p class="sec-sub">' + esc(waistTxt) + (left != null ? ' · ' + (left >= 0 ? left + ' days left' : 'deadline passed') : '') + '</p>' +
+    '<div class="btn-row"><button class="btn ghost press" id="gp-retake">Retake quiz</button></div>';
+  v.appendChild(card);
+  document.getElementById('gp-retake').onclick = gpStart;
+}
+function renderChallengeCard(v) {
+  var atts = Store.getChallenge10k();
+  var done = atts.filter(function (a) { return a.completed; }).length;
+  var card = el('div', 'card');
+  card.innerHTML = '<span class="kicker">Challenge</span><h3>Treadmill 10K</h3>' +
+    '<p class="sec-sub">10K steps in one hour — 6 × 10-minute blocks. ' +
+    atts.length + ' attempts · ' + done + ' completed.</p>' +
+    '<div class="btn-row"><button class="btn ghost press" id="ck-timer">Open timer</button>' +
+    '<button class="btn press" id="ck-log">Log attempt</button></div>' +
+    '<div id="ck-form" hidden><div class="gp-logform">' +
+    '<label class="gp-field"><span>Date</span><input class="input" id="ck-date" type="date" value="' + todayStr() + '"></label>' +
+    '<label class="gp-field"><span>Result</span><select class="input" id="ck-res"><option value="yes">Completed the hour</option><option value="no">Attempted — didn\u2019t finish</option></select></label>' +
+    '<label class="gp-field"><span>Steps</span><input class="input" id="ck-steps" type="number" inputmode="numeric" min="0" placeholder="e.g. 10250"></label>' +
+    '<div class="btn-row"><button class="btn press" id="ck-save">Save</button>' +
+    '<button class="btn ghost press" id="ck-cancel">Cancel</button></div></div></div>' +
+    (atts.length ? '<div class="ck-list">' + atts.slice(-3).reverse().map(function (a) {
+      return '<div class="ck-row"><span>' + esc(prettyDate(a.date)) + '</span><strong class="' +
+        (a.completed ? 'ck-done' : 'ck-tried') + '">' + (a.completed ? 'Completed' : 'Attempted') + '</strong>' +
+        (a.steps ? '<span>' + esc(String(a.steps)) + ' steps</span>' : '') + '</div>';
+    }).join('') + '</div>' : '');
+  v.appendChild(card);
+  document.getElementById('ck-timer').onclick = function () { window.open(GP_TIMER_URL, '_blank', 'noopener'); };
+  var form = document.getElementById('ck-form');
+  document.getElementById('ck-log').onclick = function () { form.hidden = !form.hidden; };
+  document.getElementById('ck-cancel').onclick = function () { form.hidden = true; };
+  document.getElementById('ck-save').onclick = function () {
+    var d = document.getElementById('ck-date').value;
+    if (!d) { toast('Pick a date.'); return; }
+    var st = document.getElementById('ck-steps').value.trim();
+    Store.addChallenge10k({ date: d, completed: document.getElementById('ck-res').value === 'yes', steps: st === '' ? 0 : Math.max(0, parseInt(st, 10) || 0) });
+    toast('Attempt logged. Nice work.'); render();
+  };
+}
+
 function renderHome(v) {
   var name = Store.getName();
   var s = computeStats();
@@ -2967,6 +3263,10 @@ function renderHome(v) {
 
   // active plan card
   renderPlanCard(v);
+
+  // goal planner card + 10K challenge card
+  renderGoalHomeCard(v);
+  renderChallengeCard(v);
 
   // rehab center promo
   var rh = el('button', 'rehab-home press');
