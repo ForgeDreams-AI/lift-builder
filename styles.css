@@ -194,6 +194,28 @@ a { color: var(--th-primary); }
 .prog-actions .btn { flex: 1; min-height: 48px; font-size: 17px; padding: 10px 12px; }
 .prog-actions .btn.iconbtn { flex: none; }
 
+/* ── Workout Bank ─────────────────────────────────────────────── */
+.bank-card.selected { border-color: var(--th-primary); box-shadow: 0 0 0 2px var(--th-primary), var(--th-shadow); }
+.bank-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.bank-order {
+  flex: none; width: 30px; height: 30px; border-radius: 50%;
+  background: var(--th-primary); color: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: "Barlow Condensed", sans-serif; font-weight: 700; font-size: 17px;
+}
+.bank-order.lg { width: 36px; height: 36px; font-size: 20px; }
+.bank-preview { margin: 0 0 12px; font-size: 13.5px; color: var(--th-ink-2); line-height: 1.45; }
+.bank-assembly { border-left: 4px solid var(--th-primary); }
+.bank-asm-row {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--th-surface-2); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px;
+  font-weight: 600; font-size: 15px;
+}
+.bank-asm-row .grow { flex: 1; min-width: 0; }
+.bank-asm-row small { display: block; font-weight: 400; color: var(--th-ink-2); font-size: 13px; }
+.bank-sheet-blocks { display: flex; flex-direction: column; gap: 10px; margin-bottom: 6px; }
+.bank-sheet-blocks .plan-block { margin: 0; }
+
 /* ── Builder ──────────────────────────────────────────────────── */
 .bex {
   background: var(--th-surface); border: 1px solid var(--th-line); border-radius: 14px;

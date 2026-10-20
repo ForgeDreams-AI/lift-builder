@@ -81,7 +81,7 @@ function diffDays(a, b) { return Math.round((parseYMD(b) - parseYMD(a)) / 864000
 function weekdayMon1(ds) { var w = parseYMD(ds).getDay(); return w === 0 ? 7 : w; }
 function mondayOf(ds) { return addDays(ds, -(weekdayMon1(ds) - 1)); }
 /* training weekdays (Mon=1..Sun=7) by days-per-week */
-var TRAIN_WEEKDAYS = { 2: [1, 4], 3: [1, 3, 5], 4: [1, 2, 4, 5], 5: [1, 2, 3, 4, 5] };
+var TRAIN_WEEKDAYS = { 1: [1], 2: [1, 4], 3: [1, 3, 5], 4: [1, 2, 4, 5], 5: [1, 2, 3, 4, 5], 6: [1, 2, 3, 4, 5, 6], 7: [1, 2, 3, 4, 5, 6, 7] };
 var WD_SHORT = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 /* ---------------- rotating motivational quotes (one per day) ---------------- */
@@ -135,7 +135,7 @@ var Store = (function () {
   var KEY = 'liftBuilder.v1';
   var EXDB_KEY = 'liftBuilder.exdb.v1';
 
-  function blank() { return { programs: [], logs: [], activePlan: null, measurements: [], customExercises: [], goalPlan: null, challenge10k: [] }; }
+  function blank() { return { programs: [], workouts: [], logs: [], activePlan: null, measurements: [], customExercises: [], goalPlan: null, challenge10k: [] }; }
   function read() {
     try {
       var raw = localStorage.getItem(KEY);
@@ -144,6 +144,7 @@ var Store = (function () {
       if (!p || typeof p !== 'object') return blank();
       return {
         programs: Array.isArray(p.programs) ? p.programs : [],
+        workouts: Array.isArray(p.workouts) ? p.workouts : [],
         logs: Array.isArray(p.logs) ? p.logs : [],
         activePlan: (p.activePlan && typeof p.activePlan === 'object') ? p.activePlan : null,
         measurements: Array.isArray(p.measurements) ? p.measurements : [],
@@ -158,22 +159,100 @@ var Store = (function () {
   }
   function cleanEx(e) {
     e = e || {};
-    return {
+    var out = {
       dbId: String(e.dbId || ''),
       name: String(e.name || 'Exercise'),
       sets: Math.max(1, Math.min(20, parseInt(e.sets, 10) || 3)),
       reps: Math.max(1, Math.min(200, parseInt(e.reps, 10) || 10))
     };
+    if (e.dayTag) out.dayTag = String(e.dayTag).slice(0, 40);
+    return out;
+  }
+  /* One workout block, as used by featured days, bank workouts, and
+     multi-day programs. Reps stay a string so ranges ("8-12") and
+     prescriptions ("AMRAP", "30 sec") survive saving. */
+  function cleanBlock(b) {
+    if (!b || typeof b !== 'object') return null;
+    if (b.type === 'circuit') {
+      return {
+        type: 'circuit',
+        title: String(b.title || 'Circuit').slice(0, 80),
+        rounds: Math.max(1, Math.min(20, parseInt(b.rounds, 10) || 3)),
+        warmupNote: String(b.warmupNote || '').slice(0, 200),
+        exercises: (Array.isArray(b.exercises) ? b.exercises : []).map(function (e) {
+          e = e || {};
+          return { exercise: String(e.exercise || e.name || 'Exercise').slice(0, 80), dbId: String(e.dbId || ''), reps: String(e.reps == null ? '' : e.reps).slice(0, 30) };
+        })
+      };
+    }
+    if (b.type === 'cardio') {
+      return { type: 'cardio', text: String(b.text || 'Cardio').slice(0, 300) };
+    }
+    var lift = {
+      type: 'lift',
+      exercise: String(b.exercise || b.name || 'Exercise').slice(0, 80),
+      dbId: String(b.dbId || ''),
+      sets: Math.max(1, Math.min(20, parseInt(b.sets, 10) || 3)),
+      reps: String(b.reps == null ? 10 : b.reps).slice(0, 30)
+    };
+    if (b.warmup) lift.warmup = String(b.warmup).slice(0, 60);
+    if (b.dayTag) lift.dayTag = String(b.dayTag).slice(0, 40);
+    return lift;
+  }
+  function cleanBlocks(blocks) {
+    return (Array.isArray(blocks) ? blocks : []).map(cleanBlock).filter(function (b) { return !!b; });
+  }
+  function blocksToExercises(blocks, dayName) {
+    var out = [];
+    cleanBlocks(blocks).forEach(function (b) {
+      if (b.type !== 'lift') return;
+      var e = cleanEx({ dbId: b.dbId, name: b.exercise, sets: b.sets, reps: parseInt(b.reps, 10) || 10 });
+      if (dayName) e.dayTag = String(dayName).slice(0, 40);
+      out.push(e);
+    });
+    return out;
+  }
+  function cleanDay(d) {
+    d = d || {};
+    return {
+      name: String(d.name || 'Workout').slice(0, 80),
+      sourceWorkoutId: String(d.sourceWorkoutId || ''),
+      blocks: cleanBlocks(d.blocks)
+    };
   }
   function cleanProgram(p) {
     p = p || {};
-    return {
+    var days = (Array.isArray(p.days) ? p.days : []).map(cleanDay)
+      .filter(function (d) { return d.blocks.length > 0; });
+    var exercises = Array.isArray(p.exercises) ? p.exercises.map(cleanEx) : [];
+    if (days.length && !exercises.length) {
+      days.forEach(function (d) { exercises = exercises.concat(blocksToExercises(d.blocks, d.name)); });
+    }
+    var out = {
       id: String(p.id || uid()),
       name: String(p.name || 'Untitled program').slice(0, 80),
       tagline: String(p.tagline || '').slice(0, 140),
-      exercises: Array.isArray(p.exercises) ? p.exercises.map(cleanEx) : [],
+      exercises: exercises,
       createdAt: p.createdAt || Date.now(),
       updatedAt: p.updatedAt || Date.now()
+    };
+    if (days.length) {
+      out.days = days;
+      out.daysPerWeek = Math.max(1, Math.min(7, parseInt(p.daysPerWeek, 10) || days.length));
+    }
+    return out;
+  }
+  function cleanWorkout(w) {
+    w = w || {};
+    return {
+      id: String(w.id || uid()),
+      name: String(w.name || 'Untitled workout').slice(0, 80),
+      sourceLabel: String(w.sourceLabel || '').slice(0, 140),
+      sourceKind: ['featured', 'custom', 'program', 'bank'].indexOf(w.sourceKind) >= 0 ? w.sourceKind : 'custom',
+      sourceRef: String(w.sourceRef || '').slice(0, 120),
+      blocks: cleanBlocks(w.blocks),
+      createdAt: w.createdAt || Date.now(),
+      updatedAt: w.updatedAt || Date.now()
     };
   }
   function cleanCustomExercise(c) {
@@ -239,6 +318,81 @@ var Store = (function () {
       c.id = uid();
       c.name = (p.name + ' (copy)').slice(0, 80);
       return this.saveProgram(c);
+    },
+    /* ---- workout bank: single reusable workouts, saved from the
+       builder, from featured plan days, or from My Programs. Bank
+       workouts are snapshots; assembling them into a program copies
+       their blocks into that program's days. ---- */
+    getWorkouts: function () {
+      return read().workouts.slice().sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
+    },
+    getWorkout: function (id) {
+      var ws = read().workouts;
+      for (var i = 0; i < ws.length; i++) if (ws[i].id === id) return ws[i];
+      return null;
+    },
+    saveWorkout: function (w) {
+      var s = read();
+      var c = cleanWorkout(w);
+      if (!c.blocks.length) return null;
+      c.updatedAt = Date.now();
+      var found = false;
+      for (var i = 0; i < s.workouts.length; i++) {
+        if (s.workouts[i].id === c.id) { c.createdAt = s.workouts[i].createdAt || c.createdAt; s.workouts[i] = c; found = true; break; }
+      }
+      if (!found) { c.createdAt = Date.now(); s.workouts.push(c); }
+      write(s);
+      return c;
+    },
+    deleteWorkout: function (id) {
+      var s = read();
+      s.workouts = s.workouts.filter(function (w) { return w.id !== id; });
+      write(s);
+    },
+    duplicateWorkout: function (id) {
+      var w = this.getWorkout(id);
+      if (!w) return null;
+      var c = JSON.parse(JSON.stringify(w));
+      c.id = uid();
+      c.name = (w.name + ' (copy)').slice(0, 80);
+      c.sourceRef = '';
+      return this.saveWorkout(c);
+    },
+    /* Save blocks into the bank. A sourceRef (e.g. "plan-7:2" or a
+       program id) dedupes: saving the same source twice returns the
+       existing bank workout instead of a second copy. */
+    bankBlocks: function (name, blocks, opts) {
+      opts = opts || {};
+      if (opts.sourceRef) {
+        var existing = this.getWorkouts();
+        for (var i = 0; i < existing.length; i++) {
+          if (existing[i].sourceRef === opts.sourceRef) return { workout: existing[i], created: false };
+        }
+      }
+      var saved = this.saveWorkout({
+        name: name, blocks: blocks,
+        sourceLabel: opts.sourceLabel || '', sourceKind: opts.sourceKind || 'custom',
+        sourceRef: opts.sourceRef || ''
+      });
+      return { workout: saved, created: !!saved };
+    },
+    /* Assemble bank workouts (in the given order) into a multi-day
+       program: one bank workout per training day. */
+    createProgramFromBank: function (name, workoutIds) {
+      var days = [], exercises = [];
+      (workoutIds || []).forEach(function (id) {
+        var w = Store.getWorkout(id);
+        if (!w || !w.blocks.length) return;
+        var blocks = JSON.parse(JSON.stringify(w.blocks));
+        days.push({ name: w.name, sourceWorkoutId: w.id, blocks: blocks });
+        exercises = exercises.concat(blocksToExercises(blocks, w.name));
+      });
+      if (!days.length) return null;
+      return this.saveProgram({
+        name: name || 'My program',
+        tagline: 'Built from Workout Bank · ' + days.length + ' workout' + (days.length > 1 ? 's' : ''),
+        exercises: exercises, days: days, daysPerWeek: days.length
+      });
     },
     /* ---- logs ---- */
     getLogs: function () {
@@ -606,6 +760,8 @@ var state = {
   histOpen: null,         // open log id in history
   importing: null,        // shared program being imported (#p= link)
   planView: null,         // featured plan id being viewed
+  bankSelected: [],       // workout bank ids picked to build a program, in order
+  bankProgramName: '',    // name typed in the bank program assembler
   rehabView: null,        // 'landing' or a rehab routine id
   featNav: { eq: null, style: null },   // featured drill-down: null,null=L1 · eq set=L2 · eq+style=L3
   progEx: null            // exercise selected for the projected-max trend
@@ -614,7 +770,8 @@ var state = {
 function go(tab) {
   stopLogTimer();
   state.tab = tab;
-  if (tab === 'programs') { state.featNav = { eq: null, style: null }; state.planView = null; }
+  state.planView = null;
+  if (tab === 'programs') { state.featNav = { eq: null, style: null }; }
   if (tab === 'library' && state.library.view !== 'cats') { /* keep place */ }
   if (tab === 'log' && state.log.view === 'session') { /* keep session */ }
   render();
@@ -1170,11 +1327,14 @@ function renderMyPrograms(v) {
     return;
   }
   progs.forEach(function (p) {
+    var pDays = programDays(p);
     var d = el('div', 'prog-card');
     d.innerHTML =
       '<h3>' + esc(p.name) + '</h3>' +
       (p.tagline ? '<div class="tag">' + esc(p.tagline) + '</div>' : '') +
-      '<div class="prog-meta"><span class="chip">' + p.exercises.length + ' exercises</span>' +
+      '<div class="prog-meta">' +
+      (pDays.length ? '<span class="chip">' + pDays.length + ' workouts</span>' : '') +
+      '<span class="chip">' + p.exercises.length + ' exercises</span>' +
       '<span class="chip">' + p.exercises.reduce(function (a, e) { return a + (e.sets || 0); }, 0) + ' sets</span></div>' +
       '<div class="prog-actions">' +
       '<button class="btn press" data-act="start">' + icon('play', 18) + ' Start</button>' +
@@ -1182,14 +1342,17 @@ function renderMyPrograms(v) {
       '<button class="btn ghost iconbtn press" data-act="edit" aria-label="Edit program">' + icon('pencil', 20) + '</button>' +
       '<button class="btn ghost iconbtn press" data-act="dup" aria-label="Duplicate program">' + icon('copy', 20) + '</button>' +
       '<button class="btn ghost iconbtn press" data-act="del" aria-label="Delete program">' + icon('trash', 20) + '</button>' +
-      '</div>';
+      '</div>' +
+      '<button class="btn ghost block press" data-act="bank" style="margin-top:8px">' + icon('book', 18) +
+      (pDays.length > 1 ? ' Save all days to Bank' : ' Save workout to Bank') + '</button>';
     d.querySelectorAll('[data-act]').forEach(function (b) {
       var act = b.getAttribute('data-act');
       b.onclick = function (ev) {
         ev.stopPropagation();
         if (act === 'start') openCommitSheet(p.id, 'custom');
-        else if (act === 'edit') openBuilder(p.id);
+        else if (act === 'edit') { if (pDays.length) openProgramDaysSheet(p); else openBuilder(p.id); }
         else if (act === 'share') shareProgram(p.id);
+        else if (act === 'bank') bankProgram(p);
         else if (act === 'dup') { var c = Store.duplicateProgram(p.id); if (c) { toast('Duplicated'); render(); } }
         else if (act === 'del') confirmSheet('Delete "' + p.name + '"?', 'This can\'t be undone.', function () {
           Store.deleteProgram(p.id); render(); toast('Program deleted');
@@ -1199,11 +1362,215 @@ function renderMyPrograms(v) {
     list.appendChild(d);
   });
 }
+/* Save a My Program into the Bank: flat programs become one workout;
+   multi-day programs save each day as its own bank workout. */
+function bankProgram(p) {
+  var days = programDays(p);
+  if (days.length > 1) {
+    var added = 0;
+    days.forEach(function (day, di) {
+      var res = Store.bankBlocks(day.name, day.blocks, {
+        sourceLabel: 'From "' + p.name + '"', sourceKind: 'program',
+        sourceRef: 'program:' + p.id + ':' + di
+      });
+      if (res.created) added++;
+    });
+    toast(added ? added + ' workout' + (added > 1 ? 's' : '') + ' saved to your Bank' : 'Those days are already in your Bank');
+    return;
+  }
+  if (days.length === 1) {
+    var r1 = Store.bankBlocks(days[0].name, days[0].blocks, {
+      sourceLabel: 'From "' + p.name + '"', sourceKind: 'program', sourceRef: 'program:' + p.id + ':0'
+    });
+    toast(r1.created ? 'Saved to your Bank' : 'Already in your Bank');
+    return;
+  }
+  var blocks = p.exercises.map(function (e) {
+    return { type: 'lift', exercise: e.name, dbId: e.dbId || '', sets: e.sets, reps: e.reps };
+  });
+  var res = Store.bankBlocks(p.name, blocks, {
+    sourceLabel: p.tagline || '', sourceKind: 'program', sourceRef: 'program:' + p.id
+  });
+  toast(res.created ? '"' + p.name + '" saved to your Bank' : 'Already in your Bank');
+}
+/* Reorder / trim the days of a bank-assembled program. The lifts in
+   each day are edited from the Bank workout itself; a program keeps
+   the copy it was built with. */
+function openProgramDaysSheet(p) {
+  var days = JSON.parse(JSON.stringify(programDays(p)));
+  var name = p.name;
+  function paint() {
+    var rows = days.map(function (d, i) {
+      return '<div class="bank-asm-row"><span class="bank-order">' + (i + 1) + '</span>' +
+        '<span class="grow">' + esc(d.name) + '<small>' + esc(blockSummary(d.blocks)) + '</small></span>' +
+        '<button class="tool press" data-up="' + i + '" aria-label="Move up"' + (i === 0 ? ' disabled style="opacity:.3"' : '') + '>' + icon('chevU', 20) + '</button>' +
+        '<button class="tool press" data-down="' + i + '" aria-label="Move down"' + (i === days.length - 1 ? ' disabled style="opacity:.3"' : '') + '>' + icon('chevD', 20) + '</button>' +
+        '<button class="tool danger press" data-rm="' + i + '" aria-label="Remove day">' + icon('trash', 20) + '</button></div>';
+    }).join('');
+    openSheet('<h3>Edit program</h3>' +
+      '<p class="sub">Reorder or remove days. To change the lifts inside a day, edit that workout in the Bank and rebuild \u2014 this program keeps the copy it was built with.</p>' +
+      '<label class="field"><span>Program name</span><input class="input" id="pd-name" maxlength="80" value="' + esc(name) + '"></label>' +
+      '<div id="pd-rows">' + rows + '</div>' +
+      '<div class="btn-row"><button class="btn primary block press" id="pd-save">Save changes</button></div>');
+    var root = document.getElementById('sheet-root');
+    root.querySelectorAll('[data-up],[data-down],[data-rm]').forEach(function (b) {
+      b.onclick = function () {
+        name = document.getElementById('pd-name').value;
+        if (b.hasAttribute('data-rm')) { days.splice(+b.getAttribute('data-rm'), 1); }
+        else if (b.hasAttribute('data-up')) { var i = +b.getAttribute('data-up'); var t = days[i - 1]; days[i - 1] = days[i]; days[i] = t; }
+        else { var j = +b.getAttribute('data-down'); var t2 = days[j + 1]; days[j + 1] = days[j]; days[j] = t2; }
+        paint();
+      };
+    });
+    document.getElementById('pd-save').onclick = function () {
+      var nm = document.getElementById('pd-name').value.trim();
+      if (!nm) { toast('Give your program a name', 'err'); return; }
+      if (!days.length) { toast('A program needs at least one day', 'err'); return; }
+      Store.saveProgram({ id: p.id, name: nm, tagline: p.tagline, exercises: [], days: days, daysPerWeek: days.length, createdAt: p.createdAt });
+      closeSheet();
+      render();
+      toast('Program updated');
+    };
+  }
+  paint();
+}
 function renderPrograms(v) {
   renderFeaturedPrograms(v);
   var div = el('div', 'sec-gap');
   v.appendChild(div);
   renderMyPrograms(v);
+  var div2 = el('div', 'sec-gap');
+  v.appendChild(div2);
+  renderWorkoutBank(v);
+}
+
+/* ============================================================
+   WORKOUT BANK — saved single workouts. Save them from the
+   builder, from any featured plan day, or from My Programs.
+   Start one anytime, or select a few and stack them into a
+   multi-day program.
+   ============================================================ */
+function bankSourceChip(w) {
+  if (w.sourceKind === 'featured') return 'Preset plan';
+  if (w.sourceKind === 'program') return 'From a program';
+  if (w.sourceKind === 'bank') return 'Bank copy';
+  return 'Made by you';
+}
+function renderWorkoutBank(v) {
+  var workouts = Store.getWorkouts();
+  /* keep the selection honest if workouts were deleted */
+  state.bankSelected = state.bankSelected.filter(function (id) { return !!Store.getWorkout(id); });
+  var wrap = el('div');
+  var head = '<div class="sec-head">Workout Bank<span class="n">' + workouts.length + ' saved</span></div>' +
+    '<p class="sec-sub">Your saved workouts, all in one place. Start one today, or tap "Add to program" on a few and stack them into your own program.</p>' +
+    '<div class="btn-row" style="margin:0 0 14px"><button class="btn press" id="bank-new">' + icon('plus', 18) + ' New workout</button></div>';
+  wrap.innerHTML = head;
+  v.appendChild(wrap);
+  document.getElementById('bank-new').onclick = function () { openBuilder(null, null, { mode: 'bank' }); };
+
+  if (state.bankSelected.length) {
+    var asm = el('div', 'card bank-assembly');
+    var names = state.bankSelected.map(function (id, i) {
+      var w = Store.getWorkout(id);
+      return '<div class="bank-asm-row"><span class="bank-order">' + (i + 1) + '</span><span>' + esc(w ? w.name : '') + '</span></div>';
+    }).join('');
+    asm.innerHTML = '<div class="sec-head" style="margin-top:0">Build a program</div>' +
+      '<p class="sec-sub">These become your training days, in this order.</p>' + names +
+      '<label class="field" style="margin-top:12px"><span>Program name</span>' +
+      '<input class="input" id="bank-prog-name" maxlength="80" placeholder="e.g. My 4-day split" value="' + esc(state.bankProgramName) + '"></label>' +
+      '<div class="btn-row"><button class="btn ghost press" id="bank-asm-clear">Clear</button>' +
+      '<button class="btn press" id="bank-asm-save">Save program</button></div>';
+    v.appendChild(asm);
+    document.getElementById('bank-prog-name').addEventListener('input', function (e) { state.bankProgramName = e.target.value; });
+    document.getElementById('bank-asm-clear').onclick = function () { state.bankSelected = []; render(); };
+    document.getElementById('bank-asm-save').onclick = function () {
+      var name = document.getElementById('bank-prog-name').value.trim();
+      if (!name) { toast('Give your program a name', 'err'); document.getElementById('bank-prog-name').focus(); return; }
+      var prog = Store.createProgramFromBank(name, state.bankSelected);
+      if (!prog) { toast('Pick at least one workout', 'err'); return; }
+      state.bankSelected = [];
+      state.bankProgramName = '';
+      render();
+      toast('"' + prog.name + '" built from your Bank');
+      openCommitSheet(prog.id, 'custom');
+    };
+  }
+
+  if (!workouts.length) {
+    var es = el('div');
+    es.innerHTML = emptyState('book', 'Your Bank is empty',
+      'Save a workout you build, any day from the 48 preset plans, or any program you own. It waits here until you need it.');
+    v.appendChild(es);
+    return;
+  }
+  var list = el('div');
+  workouts.forEach(function (w) {
+    var selIdx = state.bankSelected.indexOf(w.id);
+    var lifts = w.blocks.filter(function (b) { return b.type === 'lift'; });
+    var preview = lifts.slice(0, 4).map(function (b) { return esc(b.exercise); }).join(' \u00b7 ');
+    if (lifts.length > 4) preview += ' \u00b7 +' + (lifts.length - 4) + ' more';
+    var d = el('div', 'prog-card bank-card' + (selIdx >= 0 ? ' selected' : ''));
+    d.innerHTML =
+      '<div class="bank-top"><h3>' + esc(w.name) + '</h3>' +
+      (selIdx >= 0 ? '<span class="bank-order lg">' + (selIdx + 1) + '</span>' : '') + '</div>' +
+      '<div class="prog-meta"><span class="chip">' + esc(bankSourceChip(w)) + '</span>' +
+      '<span class="chip">' + esc(blockSummary(w.blocks)) + '</span></div>' +
+      (w.sourceLabel && w.sourceKind === 'featured' ? '<div class="tag">' + esc(w.sourceLabel) + '</div>' : '') +
+      (preview ? '<p class="bank-preview">' + preview + '</p>' : '') +
+      '<div class="prog-actions">' +
+      '<button class="btn press" data-act="start">' + icon('play', 18) + ' Start</button>' +
+      '<button class="btn ghost iconbtn press" data-act="edit" aria-label="Edit workout">' + icon('pencil', 20) + '</button>' +
+      '<button class="btn ghost iconbtn press" data-act="dup" aria-label="Duplicate workout">' + icon('copy', 20) + '</button>' +
+      '<button class="btn ghost iconbtn press" data-act="del" aria-label="Delete workout">' + icon('trash', 20) + '</button>' +
+      '</div>' +
+      '<button class="btn ' + (selIdx >= 0 ? 'press' : 'ghost') + ' block press" data-act="select" style="margin-top:8px">' +
+      (selIdx >= 0 ? icon('check', 18) + ' Day ' + (selIdx + 1) + ' of your new program' : icon('plus', 18) + ' Add to program') + '</button>';
+    d.querySelectorAll('[data-act]').forEach(function (b) {
+      var act = b.getAttribute('data-act');
+      b.onclick = function (ev) {
+        ev.stopPropagation();
+        if (act === 'start') startBankWorkout(w.id);
+        else if (act === 'select') {
+          var i = state.bankSelected.indexOf(w.id);
+          if (i >= 0) state.bankSelected.splice(i, 1);
+          else {
+            if (state.bankSelected.length >= 7) { toast('A program tops out at 7 days', 'err'); return; }
+            state.bankSelected.push(w.id);
+          }
+          render();
+        }
+        else if (act === 'edit') {
+          if (w.blocks.every(function (x) { return x.type === 'lift'; })) openBuilder(null, null, { mode: 'bank', bankId: w.id });
+          else openBankRenameSheet(w);
+        }
+        else if (act === 'dup') { var c = Store.duplicateWorkout(w.id); if (c) { toast('Duplicated'); render(); } }
+        else if (act === 'del') confirmSheet('Delete "' + w.name + '" from your Bank?', 'Programs you already built from it keep their copy.', function () {
+          Store.deleteWorkout(w.id); render(); toast('Workout deleted');
+        });
+      };
+    });
+    list.appendChild(d);
+  });
+  v.appendChild(list);
+}
+/* Mixed workouts (circuits/cardio) get a rename + contents sheet;
+   lift-only workouts edit in the builder. */
+function openBankRenameSheet(w) {
+  var rows = w.blocks.map(function (b) { return renderPlanBlockRow(b).outerHTML; }).join('');
+  openSheet('<h3>' + esc(w.name) + '</h3>' +
+    '<p class="sub">This saved workout has circuits or cardio, so the lift builder cannot edit it. You can rename it here; the workout itself stays as saved.</p>' +
+    '<label class="field"><span>Workout name</span><input class="input" id="bank-rename" maxlength="80" value="' + esc(w.name) + '"></label>' +
+    '<div class="bank-sheet-blocks">' + rows + '</div>' +
+    '<div class="btn-row"><button class="btn primary block press" id="bank-rename-save">Save name</button></div>');
+  document.getElementById('bank-rename-save').onclick = function () {
+    var name = document.getElementById('bank-rename').value.trim();
+    if (!name) { toast('Give it a name', 'err'); return; }
+    w.name = name;
+    Store.saveWorkout(w);
+    closeSheet();
+    render();
+    toast('Renamed');
+  };
 }
 /* ---------- featured plan detail ---------- */
 function renderPlanDetail(v) {
@@ -1229,8 +1596,16 @@ function renderPlanDetail(v) {
       body.appendChild(renderPlanBlockRow(b));
     });
     var logBtn = el('div', 'btn-row');
-    logBtn.innerHTML = '<button class="btn ghost block press" data-logday>Log this day</button>';
+    logBtn.innerHTML = '<button class="btn ghost block press" data-logday>Log this day</button>' +
+      '<button class="btn ghost block press" data-bankday>' + icon('book', 18) + ' Save to Bank</button>';
     logBtn.querySelector('[data-logday]').onclick = function () { startPlanDaySession(p.id, di); };
+    logBtn.querySelector('[data-bankday]').onclick = function () {
+      var res = Store.bankBlocks(p.title + ' \u2014 ' + day.name, day.blocks, {
+        sourceLabel: p.title + ' \u00b7 ' + p.equipment + ' \u00b7 ' + p.style,
+        sourceKind: 'featured', sourceRef: 'featured:' + p.id + ':' + di
+      });
+      toast(res.created ? '"' + day.name + '" saved to your Bank' : 'Already in your Bank');
+    };
     body.appendChild(logBtn);
     dEl.appendChild(body);
     v.appendChild(dEl);
@@ -1384,13 +1759,21 @@ function confirmSheet(title, sub, onYes) {
 /* ============================================================
    BUILDER — create / edit a program
    ============================================================ */
-function openBuilder(programId, preAdd) {
+function openBuilder(programId, preAdd, opts) {
+  opts = opts || {};
   var p = programId ? Store.getProgram(programId) : null;
+  var bw = opts.bankId ? Store.getWorkout(opts.bankId) : null;
   state.builder = {
     id: p ? p.id : null,
-    name: p ? p.name : '',
-    tagline: p ? p.tagline : '',
-    exercises: p ? JSON.parse(JSON.stringify(p.exercises)) : [],
+    mode: opts.mode === 'bank' ? 'bank' : 'program',
+    bankId: bw ? bw.id : null,
+    name: bw ? bw.name : (p ? p.name : ''),
+    tagline: bw ? (bw.sourceLabel || '') : (p ? p.tagline : ''),
+    exercises: bw
+      ? bw.blocks.filter(function (b) { return b.type === 'lift'; }).map(function (b) {
+          return { dbId: b.dbId || '', name: b.exercise, sets: b.sets, reps: parseInt(b.reps, 10) || 10 };
+        })
+      : (p ? JSON.parse(JSON.stringify(p.exercises)) : []),
     picking: null
   };
   state.builderReturn = state.tab;
@@ -1400,22 +1783,28 @@ function openBuilder(programId, preAdd) {
 function renderBuilder(v) {
   var b = state.builder;
   if (b.picking) { renderPicker(v); return; }
+  var isBank = b.mode === 'bank';
   var html = backbar('Programs') +
-    viewHead('Program Builder', b.id ? 'Edit program' : 'New program', 'Name it, pick your lifts, set your schemes.') +
-    '<label class="field"><span>Program name</span>' +
+    viewHead(isBank ? 'Workout Bank' : 'Program Builder',
+      isBank ? (b.bankId ? 'Edit workout' : 'New workout') : (b.id ? 'Edit program' : 'New program'),
+      isBank ? 'Build one workout. Save it to your Bank and use it anytime, or stack it into a program later.'
+             : 'Name it, pick your lifts, set your schemes.') +
+    '<label class="field"><span>' + (isBank ? 'Workout name' : 'Program name') + '</span>' +
     '<input class="input" id="b-name" maxlength="80" placeholder="e.g. Heavy Upper Body" value="' + esc(b.name) + '"></label>' +
-    '<label class="field"><span>Tagline (optional)</span>' +
-    '<input class="input" id="b-tag" maxlength="140" placeholder="e.g. Push day — chest, shoulders, tris" value="' + esc(b.tagline) + '"></label>' +
+    '<label class="field"><span>' + (isBank ? 'Note (optional)' : 'Tagline (optional)') + '</span>' +
+    '<input class="input" id="b-tag" maxlength="140" placeholder="e.g. Push day \u2014 chest, shoulders, tris" value="' + esc(b.tagline) + '"></label>' +
     '<div class="sec-head">Exercises<span class="n">' + b.exercises.length + '</span></div>' +
     '<div id="b-list"></div>' +
     '<button class="btn ghost block press" id="b-add" style="margin-bottom:12px">' + icon('plus', 18) + ' Add exercises</button>' +
     '<div class="btn-row"><button class="btn ghost press" id="b-cancel">Cancel</button>' +
-    '<button class="btn press" id="b-save">Save program</button></div>';
+    '<button class="btn press" id="b-save">' + (isBank ? 'Save to Bank' : 'Save program') + '</button></div>' +
+    (isBank ? '' : '<div class="btn-row"><button class="btn ghost block press" id="b-bank">Save a copy to Workout Bank</button></div>');
   v.innerHTML = html;
   document.getElementById('back-btn').onclick = function () { state.builder = null; render(); };
   document.getElementById('b-cancel').onclick = function () { state.builder = null; render(); };
   document.getElementById('b-add').onclick = function () { b.picking = { cat: null, q: '' }; render(); };
   document.getElementById('b-save').onclick = saveBuilder;
+  if (!isBank) document.getElementById('b-bank').onclick = saveBuilderToBank;
   renderBuilderList();
 }
 function renderBuilderList() {
@@ -1553,17 +1942,51 @@ function renderPicker(v) {
   }
   paintPk();
 }
-function saveBuilder() {
+function builderFormValues() {
   var b = state.builder;
   b.name = document.getElementById('b-name').value.trim();
   b.tagline = document.getElementById('b-tag').value.trim();
-  if (!b.name) { toast('Give your program a name', 'err'); document.getElementById('b-name').focus(); return; }
-  if (!b.exercises.length) { toast('Add at least one exercise', 'err'); return; }
+  if (!b.name) { toast('Give it a name first', 'err'); document.getElementById('b-name').focus(); return false; }
+  if (!b.exercises.length) { toast('Add at least one exercise', 'err'); return false; }
+  return true;
+}
+function builderBlocks() {
+  return state.builder.exercises.map(function (e) {
+    return { type: 'lift', exercise: e.name, dbId: e.dbId || '', sets: e.sets, reps: e.reps };
+  });
+}
+function saveBuilder() {
+  var b = state.builder;
+  if (!builderFormValues()) return;
+  if (b.mode === 'bank') {
+    var savedW = Store.saveWorkout({
+      id: b.bankId || undefined, name: b.name,
+      sourceLabel: b.tagline || 'Made by you', sourceKind: 'custom',
+      blocks: builderBlocks()
+    });
+    if (!savedW) { toast('That workout is empty', 'err'); return; }
+    state.builder = null;
+    state.tab = 'programs';
+    render();
+    toast('"' + savedW.name + '" saved to your Bank');
+    return;
+  }
   var saved = Store.saveProgram({ id: b.id, name: b.name, tagline: b.tagline, exercises: b.exercises });
   state.builder = null;
   state.tab = 'programs';
   render();
   toast('"' + saved.name + '" saved');
+}
+/* Save the builder's current list as a bank workout, staying in the builder. */
+function saveBuilderToBank() {
+  var b = state.builder;
+  if (!builderFormValues()) return;
+  var res = Store.bankBlocks(b.name, builderBlocks(), {
+    sourceLabel: b.tagline || 'Made by you', sourceKind: 'custom',
+    sourceRef: b.id ? 'program:' + b.id : ''
+  });
+  if (!res.workout) { toast('That workout is empty', 'err'); return; }
+  toast(res.created ? '"' + res.workout.name + '" saved to your Bank' : 'Already in your Bank');
 }
 
 /* ============================================================
@@ -1586,7 +2009,8 @@ function renderLog(v) {
     '<span class="row-chev">' + icon('chevR', 20) + '</span>';
   fb.onclick = function () { state.tab = 'programs'; render(); };
   pick.appendChild(fb);
-  if (!progs.length) {
+  var bankWorkouts = Store.getWorkouts();
+  if (!progs.length && !bankWorkouts.length) {
     var es = el('div');
     es.innerHTML = emptyState('play', 'No programs to log',
       'Build a program first, then log your workouts against it.');
@@ -1595,18 +2019,49 @@ function renderLog(v) {
   }
   progs.forEach(function (p) {
     var b = el('button', 'row-card press');
+    var pDays = programDays(p);
     b.innerHTML = '<span class="row-ico">' + icon('play', 22) + '</span>' +
       '<span class="t"><b>' + esc(p.name) + '</b>' +
-      '<small>' + p.exercises.length + ' exercises</small></span>' +
+      '<small>' + (pDays.length > 1 ? pDays.length + ' workouts \u00b7 pick a day' : p.exercises.length + ' exercises') + '</small></span>' +
       '<span class="row-chev">' + icon('chevR', 20) + '</span>';
     b.onclick = function () { startLogSession(p.id); };
     pick.appendChild(b);
   });
+  bankWorkouts.forEach(function (w) {
+    var b = el('button', 'row-card press');
+    b.innerHTML = '<span class="row-ico">' + icon('book', 22) + '</span>' +
+      '<span class="t"><b>' + esc(w.name) + '</b>' +
+      '<small>Workout Bank \u00b7 ' + esc(blockSummary(w.blocks)) + '</small></span>' +
+      '<span class="row-chev">' + icon('chevR', 20) + '</span>';
+    b.onclick = function () { startBankWorkout(w.id); };
+    pick.appendChild(b);
+  });
 }
-/* custom program -> lift blocks */
-function startLogSession(programId) {
+/* custom program -> lift blocks (single workout), or one chosen day
+   of a bank-assembled multi-day program */
+function startLogSession(programId, dayIdx) {
   var p = Store.getProgram(programId);
-  if (!p || !p.exercises.length) { toast('That program has no exercises', 'err'); return; }
+  if (!p) { toast('Program not found', 'err'); return; }
+  state.planView = null;
+  var days = programDays(p);
+  if (days.length > 1 && dayIdx == null) { openProgramDaySheet(p); return; }
+  if (days.length) {
+    var di = Math.max(0, Math.min(days.length - 1, dayIdx || 0));
+    stopLogTimer();
+    state.log.view = 'session';
+    state.log.session = {
+      programId: p.id,
+      programName: p.name + ' \u2014 ' + days[di].name,
+      planKind: 'custom',
+      date: todayStr(),
+      blocks: JSON.parse(JSON.stringify(days[di].blocks)),
+      note: ''
+    };
+    state.tab = 'log';
+    render();
+    return;
+  }
+  if (!p.exercises.length) { toast('That program has no exercises', 'err'); return; }
   stopLogTimer();
   state.log.view = 'session';
   state.log.session = {
@@ -1622,11 +2077,43 @@ function startLogSession(programId) {
   state.tab = 'log';
   render();
 }
+/* pick which day of a multi-day program to log */
+function openProgramDaySheet(p) {
+  var days = programDays(p);
+  var html = '<h3>' + esc(p.name) + '</h3><p class="sub">Which workout today?</p>';
+  days.forEach(function (d, i) {
+    html += '<button class="opt-row press" data-pday="' + i + '"><span class="grow">' + esc(d.name) +
+      '<small>' + esc(blockSummary(d.blocks)) + '</small></span>' + icon('chevR', 20) + '</button>';
+  });
+  openSheet(html);
+  document.getElementById('sheet-root').querySelectorAll('[data-pday]').forEach(function (b) {
+    b.onclick = function () { closeSheet(); startLogSession(p.id, +b.getAttribute('data-pday')); };
+  });
+}
+/* bank workout -> session (lifts, circuits, and cardio all carry over) */
+function startBankWorkout(workoutId) {
+  var w = Store.getWorkout(workoutId);
+  if (!w || !w.blocks.length) { toast('That workout is empty', 'err'); return; }
+  stopLogTimer();
+  state.planView = null;
+  state.log.view = 'session';
+  state.log.session = {
+    programId: w.id,
+    programName: w.name,
+    planKind: 'bank',
+    date: todayStr(),
+    blocks: JSON.parse(JSON.stringify(w.blocks)),
+    note: ''
+  };
+  state.tab = 'log';
+  render();
+}
 /* featured plan day -> mixed blocks */
 function startPlanDaySession(planId, dayIdx) {
   var p = getFeaturedPlan(planId);
   if (!p || !p.days[dayIdx]) { toast('Plan day not found', 'err'); return; }
   stopLogTimer();
+  state.planView = null;
   state.log.view = 'session';
   state.log.session = {
     programId: planId,
@@ -1647,10 +2134,11 @@ function setRowHTML(i, s, w, r) {
     '</div>';
 }
 function updateSetCount() {
-  var rows = document.querySelectorAll('#log-body .set-row');
+  var rows = document.querySelectorAll('#log-body .lift-block .set-row');
   var done = 0;
   rows.forEach(function (sr) {
-    if (sr.querySelector('input[data-w]').value !== '' || sr.querySelector('input[data-r]').value !== '') done++;
+    var w = sr.querySelector('input[data-w]'), r = sr.querySelector('input[data-r]');
+    if (w && r && (w.value !== '' || r.value !== '')) done++;
   });
   var d = document.getElementById('sets-done'), t = document.getElementById('sets-total');
   if (d) d.textContent = done;
@@ -2846,6 +3334,12 @@ function fmtVol(v) {
 }
 
 /* ---------- active plan / today's workout ---------- */
+/* Days of a custom program: bank-assembled programs carry real days;
+   older flat programs return [] and behave as one repeatable workout. */
+function programDays(p) {
+  if (!p || !Array.isArray(p.days)) return [];
+  return p.days.filter(function (d) { return d && Array.isArray(d.blocks) && d.blocks.length; });
+}
 function activePlanInfo() {
   var a = Store.getActivePlan();
   if (!a || !a.startDate) return { active: false };
@@ -2857,18 +3351,22 @@ function activePlanInfo() {
   var isFeat = a.kind === 'featured';
   var plan = isFeat ? getFeaturedPlan(a.programId) : Store.getProgram(a.programId);
   if (!plan) { Store.clearActivePlan(); return { active: false }; }
-  var trainDays = isFeat ? (TRAIN_WEEKDAYS[plan.daysPerWeek] || [1, 2, 3, 4, 5]) : [1, 2, 3, 4, 5, 6, 7];
+  var customDays = isFeat ? [] : programDays(plan);
+  var trainDays = isFeat
+    ? (TRAIN_WEEKDAYS[plan.daysPerWeek] || [1, 2, 3, 4, 5])
+    : (customDays.length ? (TRAIN_WEEKDAYS[plan.daysPerWeek || customDays.length] || [1, 2, 3, 4, 5]) : [1, 2, 3, 4, 5, 6, 7]);
   var wd = weekdayMon1(today);
   var idx = trainDays.indexOf(wd);
   var week = Math.floor(dayNum / 7) + 1;
   return {
-    active: true, a: a, plan: plan, isFeat: isFeat,
+    active: true, a: a, plan: plan, isFeat: isFeat, customDays: customDays,
     week: week, weeks: a.weeks, dayNum: dayNum,
     isTrain: idx >= 0, dayIdx: idx, trainDays: trainDays, weekday: wd
   };
 }
 function planDayBlocks(info) {
   if (!info.isFeat) {
+    if (info.customDays && info.customDays.length) return info.customDays[info.dayIdx].blocks;
     return [{ type: 'lift', _prog: true }];
   }
   return info.plan.days[info.dayIdx].blocks;
@@ -2910,8 +3408,11 @@ function renderPlanCard(v) {
       '<p class="sec-sub">Locked in and ready.</p></div>';
   } else {
     var pname = info.isFeat ? info.plan.title : info.plan.name;
-    var dayLabel = info.isFeat ? info.plan.days[info.dayIdx].name : 'Training day';
-    var blocks = info.isFeat ? info.plan.days[info.dayIdx].blocks : info.plan.exercises.map(function (e) { return { type: 'lift', _prog: true }; });
+    var hasCustomDays = !!(info.customDays && info.customDays.length);
+    var dayLabel = info.isFeat ? info.plan.days[info.dayIdx].name
+      : (hasCustomDays ? info.customDays[info.dayIdx].name : 'Training day');
+    var blocks = info.isFeat ? info.plan.days[info.dayIdx].blocks
+      : (hasCustomDays ? info.customDays[info.dayIdx].blocks : info.plan.exercises.map(function (e) { return { type: 'lift', _prog: true }; }));
     // week strip: this week's Mon..Sun
     var mon = mondayOf(todayStr());
     var strip = '<div class="week-strip">';
@@ -2929,7 +3430,7 @@ function renderPlanCard(v) {
       '<h3>' + esc(pname) + '</h3></div></div>' + strip;
     if (info.isTrain) {
       var wuBlocks = blocks;
-      if (!info.isFeat) {
+      if (!info.isFeat && !hasCustomDays) {
         var cp = Store.getProgram(info.a.programId);
         wuBlocks = (cp ? cp.exercises : []).map(function (e) { return { type: 'lift', exercise: e.name, dbId: e.dbId }; });
       }
@@ -2953,6 +3454,7 @@ function renderPlanCard(v) {
   };
   if (q('pc-start')) q('pc-start').onclick = function () {
     if (info.isFeat) startPlanDaySession(info.a.programId, info.dayIdx);
+    else if (info.customDays && info.customDays.length) startLogSession(info.a.programId, info.dayIdx);
     else startLogSession(info.a.programId);
   };
 }

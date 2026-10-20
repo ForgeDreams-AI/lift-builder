@@ -8,7 +8,7 @@ simple.
 
 | Key | Contents |
 |---|---|
-| `liftBuilder.v1` | `{ programs: [...], logs: [...], activePlan: {...} | null, measurements: [...], customExercises: [...], goalPlan: {...} | null, challenge10k: [...] }` — the entire user store. `goalPlan` is the goal-planner quiz result (`{ name, height, weight, waist, now, want, goal, goalLabel, deadline, weeks, waistTarget, planId, planTitle, createdAt }`); `challenge10k` is treadmill-10K attempt logs (`{ id, date, completed, steps, createdAt }`) |
+| `liftBuilder.v1` | `{ programs: [...], workouts: [...], logs: [...], activePlan: {...} | null, measurements: [...], customExercises: [...], goalPlan: {...} | null, challenge10k: [...] }` — the entire user store. `goalPlan` is the goal-planner quiz result (`{ name, height, weight, waist, now, want, goal, goalLabel, deadline, weeks, waistTarget, planId, planTitle, createdAt }`); `challenge10k` is treadmill-10K attempt logs (`{ id, date, completed, steps, createdAt }`) |
 | `liftBuilder.exdb.v1` | `{ at, data: [...] }` — cached free-exercise-db (876 exercises, ~1MB), refetched when missing/stale |
 | `liftBuilder.profile.v1` | `{ name: "..." }` — display name from onboarding, editable in settings |
 | IndexedDB `liftBuilder.v1` → `customVideos` | uploaded demo-video blobs for custom exercises, keyed by exercise id (device-local, 50MB cap) |
@@ -27,6 +27,36 @@ or `{ type: "cardio", text }`. `PLAN_RULES` holds the rest/warm-up guidance
 shown on every plan detail page. Featured plans are read-only in the UI;
 "Duplicate to My Programs" flattens their lift blocks into an editable
 custom program (circuits/cardio don't carry over).
+
+## Workout Bank
+
+`workouts` in the main store: single reusable workouts
+`{ id, name, sourceLabel, sourceKind: "featured"|"custom"|"program"|"bank",
+sourceRef, blocks: [...], createdAt, updatedAt }`. Blocks use the featured-day
+shape (`lift` with string reps so ranges survive, `circuit`, `cardio`) and are
+cleaned by `cleanBlock` in the Store.
+
+Save paths: the builder ("Save to Bank" mode, or "Save a copy to Workout Bank"
+while building a program), each featured plan day ("Save to Bank"), and My
+Programs ("Save workout to Bank" / "Save all days to Bank"). Saves carrying a
+`sourceRef` (`featured:<planId>:<dayIdx>`, `program:<id>[:<dayIdx>]`) dedupe —
+saving the same source twice returns the existing workout.
+
+Bank workouts start sessions directly (`startBankWorkout`, `planKind: "bank"`).
+Selecting up to 7 in the Bank and naming a program calls
+`Store.createProgramFromBank`, which snapshots each workout's blocks into a
+program day. Programs built this way carry `days: [{ name, sourceWorkoutId,
+blocks }]` + `daysPerWeek`; their `exercises` are derived from the days' lift
+blocks (day-tagged) for legacy displays and sharing. Snapshots are copies:
+editing a bank workout later does not change a built program. Multi-day custom
+programs resolve training weekdays through `TRAIN_WEEKDAYS[daysPerWeek]`, show
+the day's real name on Home, and log one day at a time (day picker when logging
+from the Log tab). Flat programs (no `days`) keep the old behavior: one
+repeatable workout, trainable any day.
+
+Store methods: `getWorkouts`, `getWorkout`, `saveWorkout`, `deleteWorkout`,
+`duplicateWorkout`, `bankBlocks`, `createProgramFromBank`.
+Tests: `tools/test-bank.js` (store harness, node).
 
 ## Committed ("locked in") plan
 
